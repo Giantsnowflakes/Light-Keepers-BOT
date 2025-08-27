@@ -1,9 +1,6 @@
 
-from keep_alive import keep_alive
-
 import discord
 from discord.ext import tasks, commands
-from keep_alive import keep_alive
 import datetime
 import pytz
 
@@ -170,7 +167,6 @@ async def show_leaderboard(ctx):
 
     await ctx.send(leaderboard)
 
-keep_alive()
-
 import os
-bot.run(os.getenv("DISCORD_BOT_TOKEN"))
+token = os.getenv("DISCORD_TOKEN")
+bot.run(token)
