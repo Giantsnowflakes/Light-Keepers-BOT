@@ -95,7 +95,7 @@ async def send_reminders():
                 )
                 scores[user_id] = scores.get(user_id, 0) + 1
                 
-@bot.command()
+@bot.command(name="Raidleaderboard")
 async def Raidleaderboard(ctx):
     if not scores:
         await ctx.send("No scores yet. Start raiding to earn points!")
