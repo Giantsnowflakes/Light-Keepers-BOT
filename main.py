@@ -167,6 +167,6 @@ async def show_leaderboard(ctx):
 
     await ctx.send(leaderboard)
 
-import os
+# Get the token from Railway's environment variables
 token = os.getenv("DISCORD_TOKEN")
 bot.run(token)
