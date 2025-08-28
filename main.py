@@ -122,10 +122,6 @@ async def Raidleaderboard(ctx):
 # In-memory score tracking
 user_scores = {}
 
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user}")
-
 import random
 @bot.command(name="roll")
 async def roll_dice(ctx, sides: int = 6):
