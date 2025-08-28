@@ -172,6 +172,9 @@ async def roll_dice(ctx, sides: int = 6):
     if user_id not in user_scores:
         user_scores[user_id] = {"name": user_name, "score": 0}
     user_scores[user_id]["score"] += result
+    
+      print(f"Sending roll result to {ctx.author.display_name}")
+
     await ctx.send(f"🎲 {user_name} rolled a {result} on a {sides}-sided die! Total score: {user_scores[user_id]['score']}")
 
 @bot.command(name="leaderboard")
