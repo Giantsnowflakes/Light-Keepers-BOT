@@ -173,7 +173,7 @@ async def roll_dice(ctx, sides: int = 6):
         user_scores[user_id] = {"name": user_name, "score": 0}
     user_scores[user_id]["score"] += result
     
-      print(f"Sending roll result to {ctx.author.display_name}")
+    print(f"Sending roll result to {ctx.author.display_name}")
 
     await ctx.send(f"🎲 {user_name} rolled a {result} on a {sides}-sided die! Total score: {user_scores[user_id]['score']}")
 
