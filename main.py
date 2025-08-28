@@ -140,10 +140,8 @@ import random
 @bot.command(name="roll")
 async def roll_dice(ctx, sides: int = 6):
     """Rolls a dice and updates the user's score."""
-    
 channel_name = ctx.channel.name if ctx.channel.name else "Unknown"
 print(f"ROLL command triggered by {ctx.author} in {channel_name} at {datetime.now()}")
-
     allowed_channel_id = 1409621956336287774  # 🔁 
 
     if ctx.channel.id != allowed_channel_id:
