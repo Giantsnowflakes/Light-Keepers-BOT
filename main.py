@@ -28,6 +28,17 @@ async def schedule_weekly_posts():
     now = datetime.now(london)
     if now.hour == 9:
         channel = bot.get_channel(CHANNEL_ID)
+        
+  # 🧹 Delete previous week's messages if it's Sunday
+        if now.weekday() == 6 and previous_week_messages:
+            for msg_id in previous_week_messages:
+                try:
+                    msg = await channel.fetch_message(msg_id)
+                    await msg.delete()
+                except discord.NotFound:
+                    pass  # Message already deleted or doesn't exist
+            previous_week_messages.clear()
+
         organiser_id = bot.user.id
         scores[organiser_id] = scores.get(organiser_id, 0) + 7
 
@@ -48,6 +59,9 @@ async def schedule_weekly_posts():
             )
             await msg.add_reaction("✅")
             await msg.add_reaction("❌")
+            
+            # 📝 Store message ID
+            previous_week_messages.append(msg.id)
 
 @bot.event
 async def on_raw_reaction_add(payload):
