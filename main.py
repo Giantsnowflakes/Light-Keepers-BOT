@@ -129,7 +129,6 @@ async def on_command_error(ctx, error):
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
-        # Ignore reactions from the bot itself
         return
 
     guild = bot.get_guild(payload.guild_id)
@@ -140,12 +139,15 @@ async def on_raw_reaction_add(payload):
     date_line = next((line for line in message.content.split("\n") if "Day:" in line), None)
     if not date_line:
         return
+
     date_str = date_line.split("Day: ")[1].split(" |")[0]
 
-date_line = next((line for line in message.content.split("\n") if "Day:" in line), None)
-if not date_line:
-    return
-date_str = date_line.split("Day: ")[1].split(" |")[0]
+    # ✅ Ensure fireteams and backups are initialized
+    if date_str not in fireteams:
+        fireteams[date_str] = []
+    if date_str not in backups:
+        backups[date_str] = []
+
 
 # ✅ Fix: Ensure fireteams and backups are initialized
 if date_str not in fireteams:
