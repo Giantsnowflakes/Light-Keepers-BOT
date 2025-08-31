@@ -34,7 +34,6 @@ async def schedule_weekly_posts_function():
     now = datetime.now(london)
     print(f"📅 Running schedule_weekly_posts_function at {now}")
 
-    if now.hour == 9:
         channel = bot.get_channel(CHANNEL_ID)
         if not channel:
             print(f"❌ Could not find channel with ID {CHANNEL_ID}")
