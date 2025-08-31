@@ -132,7 +132,7 @@ async def check_missed_schedule():
 # ————————
 @bot.event
 async def on_ready():
-        print("✅ on_ready fired – bot is up as", bot.user)
+    print("✅ on_ready fired – bot is up as", bot.user)
     logging.info(f"Bot started as {bot.user}")
     schedule_weekly_posts.start()
     send_reminders.start()
