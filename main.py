@@ -118,9 +118,14 @@ async def on_ready():
 async def on_command_error(ctx, error):
     print(f"⚠️ Command error: {error}")
 
+
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.emoji.name != "✅":
+        return
+
+    if payload.user_id == bot.user.id:
+        # Ignore reactions from the bot itself
         return
 
     guild = bot.get_guild(payload.guild_id)
@@ -148,6 +153,33 @@ async def on_raw_reaction_add(payload):
             f"You've been added as a backup for the Desert Perpetual raid on {date_str} at 20:00 BST.\n"
             "We'll notify you if a slot opens up!"
         )
+
+    # ✅ Update the original message with current player names
+    fireteam_names = []
+    for uid in fireteams[date_str]:
+        user = await bot.fetch_user(uid)
+        fireteam_names.append(f"{len(fireteam_names)+1}. {user.display_name}")
+
+    while len(fireteam_names) < 6:
+        fireteam_names.append(f"{len(fireteam_names)+1}. Empty Slot")
+
+    backup_names = []
+    for uid in backups[date_str]:
+        user = await bot.fetch_user(uid)
+        backup_names.append(f"{len(backup_names)+1}. {user.display_name}")
+
+    while len(backup_names) < 2:
+        backup_names.append(f"{len(backup_names)+1}. Empty Slot")
+
+    new_content = (
+        f"@everyone\n🔥 CLAN RAID EVENT: Desert Perpetual 🔥\n"
+        f"🗓️ Day: {date_str} | 🕗 Time: 20:00 BST\n\n"
+        f"🎯 Fireteam Lineup (6 Players):\n" + "\n".join(fireteam_names) +
+        "\n\n🛡️ Backup Players (2):\n" + "\n".join(backup_names) +
+        "\n\n✅ React with a ✅ if you can join this raid.\n❌ React with a ❌ if you can't make it."
+    )
+
+    await message.edit(content=new_content)
 
 # Tasks
 @tasks.loop(hours=168)
