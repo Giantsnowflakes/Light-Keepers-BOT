@@ -126,6 +126,7 @@ async def on_ready():
 async def on_command_error(ctx, error):
     print(f"⚠️ Command error: {error}")
 
+
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
@@ -148,16 +149,9 @@ async def on_raw_reaction_add(payload):
     if date_str not in backups:
         backups[date_str] = []
 
-
-# ✅ Fix: Ensure fireteams and backups are initialized
-if date_str not in fireteams:
-    fireteams[date_str] = []
-if date_str not in backups:
-    backups[date_str] = []
-
-    # Handle ✅ reaction
+    # ✅ Reaction handling
     if payload.emoji.name == "✅":
-        if member.id in fireteams.get(date_str, []) or member.id in backups.get(date_str, []):
+        if member.id in fireteams[date_str] or member.id in backups[date_str]:
             return
 
         if len(fireteams[date_str]) < 6:
@@ -173,13 +167,12 @@ if date_str not in backups:
                 "We'll notify you if a slot opens up!"
             )
 
-    # Handle ❌ reaction
     elif payload.emoji.name == "❌":
         removed = False
-        if member.id in fireteams.get(date_str, []):
+        if member.id in fireteams[date_str]:
             fireteams[date_str].remove(member.id)
             removed = True
-        if member.id in backups.get(date_str, []):
+        if member.id in backups[date_str]:
             backups[date_str].remove(member.id)
             removed = True
 
@@ -191,7 +184,7 @@ if date_str not in backups:
 
     # ✅ Update the original message with current player names
     fireteam_names = []
-    for uid in fireteams.get(date_str, []):
+    for uid in fireteams[date_str]:
         user = await bot.fetch_user(uid)
         fireteam_names.append(f"{len(fireteam_names)+1}. {user.display_name}")
 
@@ -199,7 +192,7 @@ if date_str not in backups:
         fireteam_names.append(f"{len(fireteam_names)+1}. Empty Slot")
 
     backup_names = []
-    for uid in backups.get(date_str, []):
+    for uid in backups[date_str]:
         user = await bot.fetch_user(uid)
         backup_names.append(f"{len(backup_names)+1}. {user.display_name}")
 
@@ -207,11 +200,13 @@ if date_str not in backups:
         backup_names.append(f"{len(backup_names)+1}. Empty Slot")
 
     new_content = (
-        f"@everyone\n🔥 CLAN RAID EVENT: Desert Perpetual 🔥\n"
-        f"🗓️ Day: {date_str} | 🕗 Time: 20:00 BST\n\n"
-        f"🎯 Fireteam Lineup (6 Players):\n" + "\n".join(fireteam_names) +
-        "\n\n🛡️ Backup Players (2):\n" + "\n".join(backup_names) +
-        "\n\n✅ React with a ✅ if you can join this raid.\n❌ React with a ❌ if you can't make it."
+        f"@everyone\n🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥\n\n"
+        f"📅 **Day:** {date_str}  |  🕗 **Time:** 20:00 BST\n\n"
+        f"🎯 **Fireteam Lineup (6 Players):**\n" + "\n".join(fireteam_names) +
+        "\n\n🛡️ **Backup Players (2):**\n" + "\n".join(backup_names) +
+        "\n\n✅ React with a ✅ if you're joining the raid.\n"
+        "❌ React with a ❌ if you can't make it.\n\n"
+        "Let’s assemble a legendary team and conquer the Desert Perpetual!"
     )
 
     await message.edit(content=new_content)
