@@ -139,7 +139,7 @@ async def on_raw_reaction_add(payload):
     channel = bot.get_channel(payload.channel_id)
     message = await channel.fetch_message(payload.message_id)
 
-    # 🔍 Extract date using regex
+    import re
     match = re.search(r'Day:\s*(.+?)\s*\|', message.content)
     if not match:
         print("⚠️ Could not extract date from message.")
@@ -147,7 +147,7 @@ async def on_raw_reaction_add(payload):
 
     date_str = match.group(1).strip()
 
-    # ✅ Ensure fireteams and backups are initialized
+    # Ensure fireteams and backups are initialized
     if date_str not in fireteams:
         fireteams[date_str] = []
     if date_str not in backups:
@@ -156,19 +156,26 @@ async def on_raw_reaction_add(payload):
     # ✅ Reaction handling
     if payload.emoji.name == "✅":
         if member.id in fireteams[date_str] or member.id in backups[date_str]:
-            return
+            return  # Already signed up
 
-        if len(fireteams[date_str]) < 6:
+        total_signed_up = len(fireteams[date_str]) + len(backups[date_str])
+
+        if total_signed_up < 6:
             fireteams[date_str].append(member.id)
             await member.send(
                 f"You're in! 🎉\nThanks for joining the Desert Perpetual raid team on {date_str} at 20:00 BST.\n"
                 "You'll receive a reminder one hour before the raid begins. Get ready to bring your A-game!"
             )
-        elif len(backups[date_str]) < 2:
+        elif total_signed_up < 8:
             backups[date_str].append(member.id)
             await member.send(
                 f"You've been added as a backup for the Desert Perpetual raid on {date_str} at 20:00 BST.\n"
                 "We'll notify you if a slot opens up!"
+            )
+        else:
+            await member.send(
+                f"Sorry, the raid on {date_str} is full (6 fireteam + 2 backups). "
+                "You're welcome to join next time or keep an eye out for cancellations!"
             )
 
     elif payload.emoji.name == "❌":
