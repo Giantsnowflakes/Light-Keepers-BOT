@@ -327,8 +327,17 @@ async def show_leaderboard(ctx):
 # ————————
 # Run Bot
 # ————————
-print("» Using Discord token:", repr(token))
-token = os.getenv("DISCORD_TOKEN")
-if not token:
-    logging.error("DISCORD_TOKEN is missing.")
-    exit(1)
+
+if __name__ == "__main__":
+    # 1. Load the token first
+    token = os.getenv("DISCORD_TOKEN")
+    if not token:
+        logging.error("DISCORD_TOKEN environment variable is missing.")
+        exit(1)
+
+    # 2. Mask the token for safe logging
+    masked = token[:4] + "…" + token[-4:]
+    print("» Using Discord token:", masked)
+
+    # 3. Start your bot
+    bot.run(token)
