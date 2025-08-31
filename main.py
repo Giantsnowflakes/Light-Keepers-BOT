@@ -193,34 +193,34 @@ async def on_raw_reaction_add(payload):
                 "Thanks for letting us know — hope to see you in the next raid!"
             )
 
-    # ✅ Update the original message with current player names
-    fireteam_names = []
-    for uid in fireteams[date_str]:
-        user = await bot.fetch_user(uid)
-        fireteam_names.append(f"{len(fireteam_names)+1}. {user.display_name}")
+# ✅ Update the original message with current player names
+fireteam_names = []
+for i in range(6):
+    if i < len(fireteams[date_str]):
+        user = await bot.fetch_user(fireteams[date_str][i])
+        fireteam_names.append(f"{i+1}. {user.display_name}")
+    else:
+        fireteam_names.append(f"{i+1}. Empty Slot")
 
-    while len(fireteam_names) < 6:
-        fireteam_names.append(f"{len(fireteam_names)+1}. Empty Slot")
+backup_names = []
+for i in range(2):
+    if i < len(backups[date_str]):
+        user = await bot.fetch_user(backups[date_str][i])
+        backup_names.append(f"{i+1}. {user.display_name}")
+    else:
+        backup_names.append(f"{i+1}. Empty Slot")
 
-    backup_names = []
-    for uid in backups[date_str]:
-        user = await bot.fetch_user(uid)
-        backup_names.append(f"{len(backup_names)+1}. {user.display_name}")
+new_content = (
+    f"@everyone\n🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥\n\n"
+    f"📅 **Day:** {date_str}  |  🕗 **Time:** 20:00 BST\n\n"
+    f"🎯 **Fireteam Lineup (6 Players):**\n" + "\n".join(fireteam_names) +
+    "\n\n🛡️ **Backup Players (2):**\n" + "\n".join(backup_names) +
+    "\n\n✅ React with a ✅ if you're joining the raid.\n"
+    "❌ React with a ❌ if you can't make it.\n\n"
+    "Let’s assemble a legendary team and conquer the Desert Perpetual!"
+)
 
-    while len(backup_names) < 2:
-        backup_names.append(f"{len(backup_names)+1}. Empty Slot")
-
-    new_content = (
-        f"@everyone\n🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥\n\n"
-        f"📅 **Day:** {date_str}  |  🕗 **Time:** 20:00 BST\n\n"
-        f"🎯 **Fireteam Lineup (6 Players):**\n" + "\n".join(fireteam_names) +
-        "\n\n🛡️ **Backup Players (2):**\n" + "\n".join(backup_names) +
-        "\n\n✅ React with a ✅ if you're joining the raid.\n"
-        "❌ React with a ❌ if you can't make it.\n\n"
-        "Let’s assemble a legendary team and conquer the Desert Perpetual!"
-    )
-
-    await message.edit(content=new_content)
+await message.edit(content=new_content)
 
 # Tasks
 @tasks.loop(hours=168)
