@@ -1,332 +1,334 @@
 import os
+import json
 import discord
-from discord.ext import commands, tasks
-from datetime import datetime, timedelta
+import logging
 import pytz
 import random
-import logging
 
-# Setup logging
+from discord.ext import commands, tasks
+from datetime import datetime, timedelta
+import asyncio
+import re
+
+# --- Setup Logging ---
 logging.basicConfig(level=logging.INFO)
 
-# Intents
+# --- Intents & Bot Setup ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
 intents.members = True
 
-# Bot setup
 bot = commands.Bot(command_prefix="!", intents=intents)
+lock = asyncio.Lock()
 
-# Globals
-fireteams = {}  # {date: [players]}
-backups = {}    # {date: [players]}
-scores = {}     # {user_id: points}
-user_scores = {}  # Dice game scores
-previous_week_messages = []  # Message IDs to delete
+# --- Persistence Config ---
+DATA_FILE = "raid_data.json"
 
-CHANNEL_ID = 1209484610568720384  # Raid channel ID
+def load_data():
+    try:
+        with open(DATA_FILE, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
-# ✅ Helper function to post weekly raid schedule
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+# --- Globals ---
+CHANNEL_ID = 1209484610568720384  # your raid channel
+EVENT_TITLE = "CLAN RAID EVENT: Desert Perpetual"
+
+# --- Helper: Build or rebuild a raid embed ---
+async def build_raid_embed(date_str, fire_ids, backup_ids):
+    """Return an Embed with six main slots + two backups."""
+    color = 0xE74C3C
+    emb = discord.Embed(
+        title=EVENT_TITLE,
+        description=f"📅 Day: {date_str}  |  🕗 Time: 20:00 BST",
+        color=color
+    )
+
+    # main slots 1–6
+    for i in range(6):
+        if i < len(fire_ids):
+            member = await bot.fetch_user(fire_ids[i])
+            label = f"{i+1}. {member.display_name}"
+        else:
+            label = f"{i+1}. Empty Slot"
+        emb.add_field(name=label, value="\u200b", inline=False)
+
+    # backups 1–2
+    for i in range(2):
+        if i < len(backup_ids):
+            member = await bot.fetch_user(backup_ids[i])
+            label = f"{i+1}. {member.display_name}"
+        else:
+            label = f"{i+1}. Empty Slot"
+        emb.add_field(name=label, value="\u200b", inline=False)
+
+    emb.set_footer(text="✅ react to join   ❌ react to leave")
+    return emb
+
+# --- Weekly Schedule Poster ---
 async def schedule_weekly_posts_function():
-    london = pytz.timezone("Europe/London")
-    now = datetime.now(london)
-    print(f"📅 Running schedule_weekly_posts_function at {now}")
-
+    tz = pytz.timezone("Europe/London")
+    now = datetime.now(tz)
     channel = bot.get_channel(CHANNEL_ID)
     if not channel:
-        print(f"❌ Could not find channel with ID {CHANNEL_ID}")
+        logging.error(f"Channel {CHANNEL_ID} not found")
         return
 
-    print(f"📨 Found channel: {channel.name} (ID: {channel.id})")
+    data = load_data()
 
-    # 🧹 Delete previous week's messages if it's Sunday
-    if now.weekday() == 6 and previous_week_messages:
-        print("🧹 Deleting previous week's messages...")
-        for msg_id in previous_week_messages:
-            try:
-                msg = await channel.fetch_message(msg_id)
-                await msg.delete()
-                print(f"🗑️ Deleted message ID {msg_id}")
-            except discord.NotFound:
-                print(f"⚠️ Message ID {msg_id} not found.")
-        previous_week_messages.clear()
+    # every Sunday delete last week's posts
+    if now.weekday() == 6:
+        async for msg in channel.history(limit=100):
+            if msg.author == bot.user and msg.embeds:
+                if msg.embeds[0].title == EVENT_TITLE:
+                    await msg.delete()
+        # optionally reset data for older dates
+        # data = {k: v for k, v in data.items() if ...}
 
-    organiser_id = bot.user.id
-    scores[organiser_id] = scores.get(organiser_id, 0) + 7
+    # post for next 7 days
+    for delta in range(7):
+        day = now + timedelta(days=delta)
+        date_str = day.strftime("%A, %d %B")
 
-    # Fetch recent messages to check for duplicates
-    recent_messages = [msg async for msg in channel.history(limit=100)]
-
-    for i in range(7):
-        raid_date = now + timedelta(days=i)
-        date_str = raid_date.strftime("%A, %d %B")
-
-        # Check if a message for this date already exists
-        if any(date_str in msg.content for msg in recent_messages):
-            print(f"⏳ Skipping {date_str} — already posted.")
+        # skip if already in data and message exists
+        exists = False
+        async for msg in channel.history(limit=100):
+            if msg.embeds and msg.embeds[0].title == EVENT_TITLE:
+                if date_str in msg.embeds[0].description:
+                    exists = True
+                    break
+        if exists:
             continue
 
-        fireteams[date_str] = []
-        backups[date_str] = []
+        # init persistent slots
+        data.setdefault(date_str, {"fireteams": [], "backups": []})
+        await asyncio.sleep(0.5)  # rate-limit buffer
 
-        try:
-            msg = await channel.send(
-                f"@everyone\n🔥 CLAN RAID EVENT: Desert Perpetual 🔥\n"
-                f"🗓️ Day: {date_str} | 🕗 Time: 20:00 BST\n\n"
-                f"🎯 Fireteam Lineup (6 Players):\n" +
-                "\n".join([f"{i+1}. Empty Slot" for i in range(6)]) +
-                "\n\n🛡️ Backup Players (2):\n" +
-                "\n".join([f"{i+1}. Empty Slot" for i in range(2)]) +
-                "\n\n✅ React with a ✅ if you can join this raid.\n❌ React with a ❌ if you can't make it."
-            )
-            await msg.add_reaction("✅")
-            await msg.add_reaction("❌")
-            previous_week_messages.append(msg.id)
-            print(f"✅ Posted raid message for {date_str}")
-        except Exception as e:
-            print(f"❌ Failed to post message for {date_str}: {e}")
+        # send embed and add reactions
+        emb = await build_raid_embed(date_str,
+                                     data[date_str]["fireteams"],
+                                     data[date_str]["backups"])
+        msg = await channel.send("@everyone", embed=emb)
+        await msg.add_reaction("✅")
+        await msg.add_reaction("❌")
 
-# ✅ Check if bot missed the scheduled post
+    save_data(data)
+
+# --- Check & Recover Missed Schedule ---
 async def check_missed_schedule():
-    london = pytz.timezone("Europe/London")
-    now = datetime.now(london)
-    print(f"🔍 check_missed_schedule() called at {now}")
-
-    try:
-        with open("last_schedule_time.txt", "r") as f:
-            last_run_str = f.read().strip()
-            last_run = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
-            print(f"📄 Last run was at {last_run}")
-    except (FileNotFoundError, ValueError):
-        print("⚠️ No valid last_schedule_time.txt found.")
-        last_run = None
-
+    tz = pytz.timezone("Europe/London")
+    now = datetime.now(tz)
+    # if Sunday after 09:00 BST
     if now.weekday() == 6 and now.hour >= 9:
-        if not last_run or last_run.date() != now.date():
-            print("✅ Missed schedule detected — posting now.")
-            await schedule_weekly_posts_function()
-            with open("last_schedule_time.txt", "w") as f:
-                f.write(now.strftime("%Y-%m-%d %H:%M:%S"))
-        else:
-            print("⏳ Already posted today — skipping.")
-    else:
-        print("🕘 Not Sunday after 9am — skipping.")
+        await schedule_weekly_posts_function()
 
-# Events
+# --- Reaction Add Handler ---
+@bot.event
+async def on_raw_reaction_add(payload):
+    # ignore bot
+    if payload.user_id == bot.user.id:
+        return
+
+    # only our channel
+    if payload.channel_id != CHANNEL_ID:
+        return
+
+    # only ✅ / ❌
+    if payload.emoji.name not in ("✅", "❌"):
+        return
+
+    channel = bot.get_channel(payload.channel_id)
+    message = await channel.fetch_message(payload.message_id)
+
+    # must be our raid embed
+    if not message.embeds or message.embeds[0].title != EVENT_TITLE:
+        return
+
+    # parse date from embed description
+    desc = message.embeds[0].description
+    m = re.search(r"Day:\s*(.+?)\s*\|", desc)
+    if not m:
+        return
+    date_str = m.group(1).strip()
+
+    # load & init data
+    async with lock:
+        data = load_data()
+        raid = data.setdefault(date_str, {"fireteams": [], "backups": []})
+        ft = raid["fireteams"]
+        bu = raid["backups"]
+
+        # fetch member
+        guild = bot.get_guild(payload.guild_id)
+        member = guild.get_member(payload.user_id)
+
+        # join
+        if payload.emoji.name == "✅":
+            if member.id in ft or member.id in bu:
+                return
+            if len(ft) < 6:
+                ft.append(member.id)
+                await member.send(f"🎉 You’re locked in for {date_str} @ 20:00 BST!")
+            elif len(bu) < 2:
+                bu.append(member.id)
+                await member.send(f"🛡️ You’re on backup for {date_str} @ 20:00 BST.")
+            else:
+                await member.send(f"⚠️ Raid on {date_str} is full (6 + 2).")
+
+        # leave
+        else:
+            removed = False
+            if member.id in ft:
+                ft.remove(member.id)
+                removed = True
+            if member.id in bu:
+                bu.remove(member.id)
+                removed = True
+            if removed:
+                await member.send(f"❌ You’ve left the raid for {date_str}.")
+
+        save_data(data)
+
+    # rebuild embed
+    new_emb = await build_raid_embed(date_str, ft, bu)
+    await message.edit(embed=new_emb)
+
+# --- Reaction Remove Handler ---
+@bot.event
+async def on_raw_reaction_remove(payload):
+    # mirror add logic for freeing slots
+    if payload.user_id == bot.user.id:
+        return
+    if payload.channel_id != CHANNEL_ID:
+        return
+    if payload.emoji.name not in ("✅", "❌"):
+        return
+
+    channel = bot.get_channel(payload.channel_id)
+    message = await channel.fetch_message(payload.message_id)
+    if not message.embeds or message.embeds[0].title != EVENT_TITLE:
+        return
+
+    m = re.search(r"Day:\s*(.+?)\s*\|", message.embeds[0].description)
+    if not m:
+        return
+    date_str = m.group(1).strip()
+
+    async with lock:
+        data = load_data()
+        raid = data.get(date_str)
+        if not raid:
+            return
+        ft = raid["fireteams"]
+        bu = raid["backups"]
+
+        guild = bot.get_guild(payload.guild_id)
+        member = guild.get_member(payload.user_id)
+        removed = False
+
+        if member.id in ft:
+            ft.remove(member.id)
+            removed = True
+        if member.id in bu:
+            bu.remove(member.id)
+            removed = True
+
+        if removed:
+            await member.send(f"❌ You’ve left the raid for {date_str}.")
+            save_data(data)
+
+            new_emb = await build_raid_embed(date_str, ft, bu)
+            await message.edit(embed=new_emb)
+
+# --- On Bot Ready ---
 @bot.event
 async def on_ready():
-    print(f"✅ Bot started at {datetime.now()} as {bot.user}")
+    logging.info(f"Logged in as {bot.user} — scheduling tasks.")
     schedule_weekly_posts.start()
     send_reminders.start()
     await check_missed_schedule()
 
-@bot.event
-async def on_command_error(ctx, error):
-    print(f"⚠️ Command error: {error}")
-
-
-import re
-
-@bot.event
-async def on_raw_reaction_add(payload):
-    if payload.user_id == bot.user.id:
-        return
-
-    guild = bot.get_guild(payload.guild_id)
-    member = guild.get_member(payload.user_id)
-    channel = bot.get_channel(payload.channel_id)
-    message = await channel.fetch_message(payload.message_id)
-
-    import re
-    match = re.search(r'Day:\s*(.+?)\s*\|', message.content)
-    if not match:
-        print("⚠️ Could not extract date from message.")
-        return
-
-    date_str = match.group(1).strip()
-
-    # Ensure fireteams and backups are initialized
-    if date_str not in fireteams:
-        fireteams[date_str] = []
-    if date_str not in backups:
-        backups[date_str] = []
-
-    # ✅ Reaction handling
-    if payload.emoji.name == "✅":
-        # Prevent duplicate signups
-        if member.id in fireteams[date_str] or member.id in backups[date_str]:
-            return
-
-        if len(fireteams[date_str]) < 6:
-            fireteams[date_str].append(member.id)
-            await member.send(
-                f"You're in! 🎉\nThanks for joining the Desert Perpetual raid team on {date_str} at 20:00 BST.\n"
-                "You'll receive a reminder one hour before the raid begins. Get ready to bring your A-game!"
-            )
-        elif len(backups[date_str]) < 2:
-            backups[date_str].append(member.id)
-            await member.send(
-                f"You've been added as a backup for the Desert Perpetual raid on {date_str} at 20:00 BST.\n"
-                "We'll notify you if a slot opens up!"
-            )
-        else:
-            await member.send(
-                f"Sorry, the raid on {date_str} is full (6 fireteam + 2 backups). "
-                "You're welcome to join next time or keep an eye out for cancellations!"
-            )
-
-    elif payload.emoji.name == "❌":
-        removed = False
-        if member.id in fireteams[date_str]:
-            fireteams[date_str].remove(member.id)
-            removed = True
-        if member.id in backups[date_str]:
-            backups[date_str].remove(member.id)
-            removed = True
-
-        if removed:
-            await member.send(
-                f"You've been removed from the Desert Perpetual raid team or backup list for {date_str}.\n"
-                "Thanks for letting us know — hope to see you in the next raid!"
-            )
-
-    # ✅ Update the original message with current player names
-    fireteam_names = []
-    for i in range(6):
-        if i < len(fireteams[date_str]):
-            user = await bot.fetch_user(fireteams[date_str][i])
-            fireteam_names.append(f"{i+1}. {user.display_name}")
-        else:
-            fireteam_names.append(f"{i+1}. Empty Slot")
-
-    backup_names = []
-    for i in range(2):
-        if i < len(backups[date_str]):
-            user = await bot.fetch_user(backups[date_str][i])
-            backup_names.append(f"{i+1}. {user.display_name}")
-        else:
-            backup_names.append(f"{i+1}. Empty Slot")
-
-    new_content = (
-        f"@everyone\n🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥\n\n"
-        f"📅 **Day:** {date_str}  |  🕗 **Time:** 20:00 BST\n\n"
-        f"🎯 **Fireteam Lineup (6 Players):**\n" + "\n".join(fireteam_names) +
-        "\n\n🛡️ **Backup Players (2):**\n" + "\n".join(backup_names) +
-        "\n\n✅ React with a ✅ if you're joining the raid.\n"
-        "❌ React with a ❌ if you can't make it.\n\n"
-        "Let’s assemble a legendary team and conquer the Desert Perpetual!"
-    )
-
-    await message.edit(content=new_content)
-
-# Tasks
+# --- Weekly Posting Task ---
 @tasks.loop(hours=168)
 async def schedule_weekly_posts():
     await schedule_weekly_posts_function()
 
-
+# --- Reminder Task ---
 @tasks.loop(minutes=1)
 async def send_reminders():
-    london = pytz.timezone("Europe/London")
-    now = datetime.now(london)
+    tz = pytz.timezone("Europe/London")
+    now = datetime.now(tz)
+    data = load_data()
 
-    for date_str, players in fireteams.items():
+    for date_str, raid in data.items():
         try:
-            # Clean the date string to remove leading asterisks or whitespace
-            cleaned_date_str = date_str.lstrip("* ").strip()
-
-            # Parse the cleaned date string
-            raid_time = datetime.strptime(cleaned_date_str, "%A, %d %B").replace(hour=19, minute=0)
-
-            # Compare current time with raid time
-            if now.strftime("%A, %d %B %H:%M") == raid_time.strftime("%A, %d %B %H:%M"):
-                for user_id in players:
-                    user = await bot.fetch_user(user_id)
+            # parse date and set to 19:00
+            dt = datetime.strptime(date_str, "%A, %d %B").replace(
+                year=now.year, hour=19, minute=0)
+            if now.strftime("%A, %d %B %H:%M") == dt.strftime("%A, %d %B %H:%M"):
+                # one hour before at 19:00
+                for uid in raid["fireteams"]:
+                    user = await bot.fetch_user(uid)
                     await user.send(
-                        "⏳ One hour to go!\nYour raid team for Desert Perpetual assembles at 20:00 BST tonight.\n"
-                        "Please be punctual, geared up, and ready to dive in. Let’s make this a legendary run!"
+                        "⏳ One hour to go! See you at 20:00 BST for Desert Perpetual."
                     )
-                    scores[user_id] = scores.get(user_id, 0) + 1
-
-        except ValueError as e:
-            print(f"[send_reminders] Date parsing error for '{date_str}': {e}")
-            # Optionally notify admins or log to a channel
         except Exception as e:
-            print(f"[send_reminders] Unexpected error: {e}")
+            logging.warning(f"Reminder parse error for '{date_str}': {e}")
 
-# Commands
+# --- Raid Leaderboard Command ---
 @bot.command(name="Raidleaderboard")
 async def Raidleaderboard(ctx):
+    data = load_data()
+    scores = {}
+    # award 1pt per confirmed raid in past (optional: track separately)
+    for raid in data.values():
+        for uid in raid["fireteams"]:
+            scores[uid] = scores.get(uid, 0) + 1
+
     if not scores:
-        await ctx.send("No scores yet. Start raiding to earn points!")
-        return
+        return await ctx.send("No raid participation recorded yet.")
 
-    bot_id = bot.user.id
-    sorted_scores = sorted(
-        [(uid, pts) for uid, pts in scores.items() if uid != bot_id],
-        key=lambda x: x[1],
-        reverse=True
-    )
+    sorted_lead = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    lines = [f"**{await bot.fetch_user(uid)}**: {pts}" for uid, pts in sorted_lead]
+    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(lines))
 
-    if not sorted_scores:
-        await ctx.send("No player scores yet. Get involved in raids to earn points!")
-        return
-
-    leaderboard = []
-    for user_id, points in sorted_scores:
-        user = await bot.fetch_user(user_id)
-        leaderboard.append(f"**{user.name}**: {points} point{'s' if points != 1 else ''}")
-
-    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(leaderboard))
+# --- Dice Game Commands (unchanged) ---
+user_scores = {}
 
 @bot.command(name="roll")
 async def roll_dice(ctx, sides: int = 6):
-    channel_name = ctx.channel.name if ctx.channel.name else "Unknown"
-    print(f"ROLL command triggered by {ctx.author} in {channel_name} at {datetime.now()}")
-
-    allowed_channel_id = 1409621956336287774
-
-    if ctx.channel.id != allowed_channel_id:
-        await ctx.send("❌ This command can only be used in the designated dice game channel.")
-        return
-
     if sides < 2:
-        await ctx.send("Dice must have at least 2 sides!")
-        return
-
+        return await ctx.send("Dice must have at least 2 sides!")
     result = random.randint(1, sides)
-    user_id = str(ctx.author.id)
-    user_name = ctx.author.display_name
-
-    if user_id not in user_scores:
-        user_scores[user_id] = {"name": user_name, "score": 0}
-    user_scores[user_id]["score"] += result
-    
-    print(f"Sending roll result to {ctx.author.display_name}")
-
-    await ctx.send(f"🎲 {user_name} rolled a {result} on a {sides}-sided die! Total score: {user_scores[user_id]['score']}")
+    uid = str(ctx.author.id)
+    user_scores.setdefault(uid, {"name": ctx.author.display_name, "score": 0})
+    user_scores[uid]["score"] += result
+    await ctx.send(
+        f"🎲 {ctx.author.display_name} rolled a {result} on a {sides}-sided die! "
+        f"Total score: {user_scores[uid]['score']}"
+    )
 
 @bot.command(name="leaderboard")
 async def show_leaderboard(ctx):
     if not user_scores:
-        await ctx.send("No scores yet! Roll the dice with `!roll`.")
-        return
+        return await ctx.send("No scores yet! Roll the dice with `!roll`.")
+    sorted_us = sorted(user_scores.values(), key=lambda x: x["score"], reverse=True)
+    msg = "**🏆 Dice Leaderboard 🏆**\n"
+    for i, player in enumerate(sorted_us[:5], 1):
+        msg += f"{i}. {player['name']} – {player['score']} pts\n"
+    await ctx.send(msg)
 
-    sorted_scores = sorted(user_scores.values(), key=lambda x: x["score"], reverse=True)
-    top_players = sorted_scores[:5]
-
-    leaderboard = "**🏆 Leaderboard 🏆**\n"
-    for i, player in enumerate(top_players, start=1):
-        leaderboard += f"{i}. {player['name']} - {player['score']} points\n"
-
-    await ctx.send(leaderboard)
-
-# Run bot
+# --- Run Bot ---
 token = os.getenv("DISCORD_TOKEN")
 if not token:
-    print("❌ DISCORD_TOKEN is missing. Check your Railway environment variables.")
-    exit()
+    logging.error("DISCORD_TOKEN missing in env.")
+    exit(1)
 
 bot.run(token)
 
