@@ -220,20 +220,35 @@ async def on_raw_reaction_add(payload):
 async def schedule_weekly_posts():
     await schedule_weekly_posts_function()
 
+
 @tasks.loop(minutes=1)
 async def send_reminders():
     london = pytz.timezone("Europe/London")
     now = datetime.now(london)
+
     for date_str, players in fireteams.items():
-        raid_time = datetime.strptime(date_str, "%A, %d %B").replace(hour=19, minute=0)
-        if now.strftime("%A, %d %B %H:%M") == raid_time.strftime("%A, %d %B %H:%M"):
-            for user_id in players:
-                user = await bot.fetch_user(user_id)
-                await user.send(
-                    "⏳ One hour to go!\nYour raid team for Desert Perpetual assembles at 20:00 BST tonight.\n"
-                    "Please be punctual, geared up, and ready to dive in. Let’s make this a legendary run!"
-                )
-                scores[user_id] = scores.get(user_id, 0) + 1
+        try:
+            # Clean the date string to remove leading asterisks or whitespace
+            cleaned_date_str = date_str.lstrip("* ").strip()
+
+            # Parse the cleaned date string
+            raid_time = datetime.strptime(cleaned_date_str, "%A, %d %B").replace(hour=19, minute=0)
+
+            # Compare current time with raid time
+            if now.strftime("%A, %d %B %H:%M") == raid_time.strftime("%A, %d %B %H:%M"):
+                for user_id in players:
+                    user = await bot.fetch_user(user_id)
+                    await user.send(
+                        "⏳ One hour to go!\nYour raid team for Desert Perpetual assembles at 20:00 BST tonight.\n"
+                        "Please be punctual, geared up, and ready to dive in. Let’s make this a legendary run!"
+                    )
+                    scores[user_id] = scores.get(user_id, 0) + 1
+
+        except ValueError as e:
+            print(f"[send_reminders] Date parsing error for '{date_str}': {e}")
+            # Optionally notify admins or log to a channel
+        except Exception as e:
+            print(f"[send_reminders] Unexpected error: {e}"
 
 # Commands
 @bot.command(name="Raidleaderboard")
