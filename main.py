@@ -27,12 +27,32 @@ previous_week_messages = []  # Message IDs to delete
 
 CHANNEL_ID = 1209484610568720384  # Raid channel ID
 
+async def check_missed_schedule():
+    london = pytz.timezone("Europe/London")
+    now = datetime.now(london)
+
+    # Load last post time from a file or variable
+    try:
+        with open("last_schedule_time.txt", "r") as f:
+            last_run_str = f.read().strip()
+            last_run = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
+    except (FileNotFoundError, ValueError):
+        last_run = None
+
+    # If it's Sunday after 9am and the post hasn't been sent today
+    if now.weekday() == 6 and now.hour >= 9:
+        if not last_run or last_run.date() != now.date():
+            await schedule_weekly_posts_function()  # Your post logic here
+            with open("last_schedule_time.txt", "w") as f:
+                f.write(now.strftime("%Y-%m-%d %H:%M:%S"))
+
 # Events
 @bot.event
 async def on_ready():
     print(f"✅ Bot started at {datetime.now()} as {bot.user}")
     schedule_weekly_posts.start()
     send_reminders.start()
+    await check_missed_schedule()
 
 @bot.event
 async def on_command_error(ctx, error):
