@@ -153,6 +153,22 @@ async def on_ready():
         logging.info("No existing raid posts found on startup – posting initial week block.")
         await schedule_weekly_posts_function()
 
+@bot.event
+async def on_resumed():
+    logging.info("Session RESUMED → checking for missing raid posts")
+
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        # Rebuild the in-memory list from history
+        previous_week_messages.clear()
+        async for msg in channel.history(limit=200):
+            if msg.author == bot.user and "CLAN RAID EVENT" in msg.content:
+                previous_week_messages.append(msg.id)
+
+    # If we still have no posts tracked, rebuild the week block
+    if not previous_week_messages:
+        logging.info("No raid posts found on resume → posting week block now")
+        await schedule_weekly_posts_function()
 # —————————————————————————————————————————
 # Reactions: ✅ join / ❌ leave
 # —————————————————————————————————————————
