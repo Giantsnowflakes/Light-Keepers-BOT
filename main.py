@@ -142,6 +142,17 @@ async def on_raw_reaction_add(payload):
         return
     date_str = date_line.split("Day: ")[1].split(" |")[0]
 
+date_line = next((line for line in message.content.split("\n") if "Day:" in line), None)
+if not date_line:
+    return
+date_str = date_line.split("Day: ")[1].split(" |")[0]
+
+# ✅ Fix: Ensure fireteams and backups are initialized
+if date_str not in fireteams:
+    fireteams[date_str] = []
+if date_str not in backups:
+    backups[date_str] = []
+
     # Handle ✅ reaction
     if payload.emoji.name == "✅":
         if member.id in fireteams.get(date_str, []) or member.id in backups.get(date_str, []):
