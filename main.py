@@ -248,7 +248,7 @@ async def send_reminders():
             print(f"[send_reminders] Date parsing error for '{date_str}': {e}")
             # Optionally notify admins or log to a channel
         except Exception as e:
-            print(f"[send_reminders] Unexpected error: {e}"
+            print(f"[send_reminders] Unexpected error: {e}")
 
 # Commands
 @bot.command(name="Raidleaderboard")
