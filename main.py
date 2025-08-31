@@ -155,18 +155,17 @@ async def on_raw_reaction_add(payload):
 
     # ✅ Reaction handling
     if payload.emoji.name == "✅":
+        # Prevent duplicate signups
         if member.id in fireteams[date_str] or member.id in backups[date_str]:
-            return  # Already signed up
+            return
 
-        total_signed_up = len(fireteams[date_str]) + len(backups[date_str])
-
-        if total_signed_up < 6:
+        if len(fireteams[date_str]) < 6:
             fireteams[date_str].append(member.id)
             await member.send(
                 f"You're in! 🎉\nThanks for joining the Desert Perpetual raid team on {date_str} at 20:00 BST.\n"
                 "You'll receive a reminder one hour before the raid begins. Get ready to bring your A-game!"
             )
-        elif total_signed_up < 8:
+        elif len(backups[date_str]) < 2:
             backups[date_str].append(member.id)
             await member.send(
                 f"You've been added as a backup for the Desert Perpetual raid on {date_str} at 20:00 BST.\n"
