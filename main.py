@@ -118,12 +118,8 @@ async def on_ready():
 async def on_command_error(ctx, error):
     print(f"⚠️ Command error: {error}")
 
-
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.emoji.name != "✅":
-        return
-
     if payload.user_id == bot.user.id:
         # Ignore reactions from the bot itself
         return
@@ -138,25 +134,43 @@ async def on_raw_reaction_add(payload):
         return
     date_str = date_line.split("Day: ")[1].split(" |")[0]
 
-    if member.id in fireteams.get(date_str, []) or member.id in backups.get(date_str, []):
-        return
+    # Handle ✅ reaction
+    if payload.emoji.name == "✅":
+        if member.id in fireteams.get(date_str, []) or member.id in backups.get(date_str, []):
+            return
 
-    if len(fireteams[date_str]) < 6:
-        fireteams[date_str].append(member.id)
-        await member.send(
-            f"You're in! 🎉\nThanks for joining the Desert Perpetual raid team on {date_str} at 20:00 BST.\n"
-            "You'll receive a reminder one hour before the raid begins. Get ready to bring your A-game!"
-        )
-    elif len(backups[date_str]) < 2:
-        backups[date_str].append(member.id)
-        await member.send(
-            f"You've been added as a backup for the Desert Perpetual raid on {date_str} at 20:00 BST.\n"
-            "We'll notify you if a slot opens up!"
-        )
+        if len(fireteams[date_str]) < 6:
+            fireteams[date_str].append(member.id)
+            await member.send(
+                f"You're in! 🎉\nThanks for joining the Desert Perpetual raid team on {date_str} at 20:00 BST.\n"
+                "You'll receive a reminder one hour before the raid begins. Get ready to bring your A-game!"
+            )
+        elif len(backups[date_str]) < 2:
+            backups[date_str].append(member.id)
+            await member.send(
+                f"You've been added as a backup for the Desert Perpetual raid on {date_str} at 20:00 BST.\n"
+                "We'll notify you if a slot opens up!"
+            )
+
+    # Handle ❌ reaction
+    elif payload.emoji.name == "❌":
+        removed = False
+        if member.id in fireteams.get(date_str, []):
+            fireteams[date_str].remove(member.id)
+            removed = True
+        if member.id in backups.get(date_str, []):
+            backups[date_str].remove(member.id)
+            removed = True
+
+        if removed:
+            await member.send(
+                f"You've been removed from the Desert Perpetual raid team or backup list for {date_str}.\n"
+                "Thanks for letting us know — hope to see you in the next raid!"
+            )
 
     # ✅ Update the original message with current player names
     fireteam_names = []
-    for uid in fireteams[date_str]:
+    for uid in fireteams.get(date_str, []):
         user = await bot.fetch_user(uid)
         fireteam_names.append(f"{len(fireteam_names)+1}. {user.display_name}")
 
@@ -164,7 +178,7 @@ async def on_raw_reaction_add(payload):
         fireteam_names.append(f"{len(fireteam_names)+1}. Empty Slot")
 
     backup_names = []
-    for uid in backups[date_str]:
+    for uid in backups.get(date_str, []):
         user = await bot.fetch_user(uid)
         backup_names.append(f"{len(backup_names)+1}. {user.display_name}")
 
