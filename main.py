@@ -127,6 +127,8 @@ async def on_command_error(ctx, error):
     print(f"⚠️ Command error: {error}")
 
 
+import re
+
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
@@ -137,18 +139,13 @@ async def on_raw_reaction_add(payload):
     channel = bot.get_channel(payload.channel_id)
     message = await channel.fetch_message(payload.message_id)
 
-
-    date_line = next((line for line in message.content.split("\n") if "Day:" in line), None)
-    if not date_line or "Day: " not in date_line:
+    # 🔍 Extract date using regex
+    match = re.search(r'Day:\s*(.+?)\s*\|', message.content)
+    if not match:
         print("⚠️ Could not extract date from message.")
         return
 
-    try:
-        date_str = date_line.split("Day: ")[1].split(" |")[0]
-    except IndexError:
-        print("⚠️ Date line format is invalid.")
-        return
-
+    date_str = match.group(1).strip()
 
     # ✅ Ensure fireteams and backups are initialized
     if date_str not in fireteams:
