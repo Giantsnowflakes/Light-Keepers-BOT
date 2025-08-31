@@ -1,3 +1,4 @@
+
 import os
 import discord
 from discord.ext import commands, tasks
@@ -27,11 +28,51 @@ previous_week_messages = []  # Message IDs to delete
 
 CHANNEL_ID = 1209484610568720384  # Raid channel ID
 
+# ✅ Helper function to post weekly raid schedule
+async def schedule_weekly_posts_function():
+    london = pytz.timezone("Europe/London")
+    now = datetime.now(london)
+
+    if now.hour == 9:
+        channel = bot.get_channel(CHANNEL_ID)
+
+        # 🧹 Delete previous week's messages if it's Sunday
+        if now.weekday() == 6 and previous_week_messages:
+            for msg_id in previous_week_messages:
+                try:
+                    msg = await channel.fetch_message(msg_id)
+                    await msg.delete()
+                except discord.NotFound:
+                    pass
+            previous_week_messages.clear()
+
+        organiser_id = bot.user.id
+        scores[organiser_id] = scores.get(organiser_id, 0) + 7
+
+        for i in range(7):
+            raid_date = now + timedelta(days=i)
+            date_str = raid_date.strftime("%A, %d %B")
+            fireteams[date_str] = []
+            backups[date_str] = []
+
+            msg = await channel.send(
+                f"@everyone\n🔥 CLAN RAID EVENT: Desert Perpetual 🔥\n"
+                f"🗓️ Day: {date_str} | 🕗 Time: 20:00 BST\n\n"
+                f"🎯 Fireteam Lineup (6 Players):\n" +
+                "\n".join([f"{i+1}. Empty Slot" for i in range(6)]) +
+                "\n\n🛡️ Backup Players (2):\n" +
+                "\n".join([f"{i+1}. Empty Slot" for i in range(2)]) +
+                "\n\n✅ React with a ✅ if you can join this raid.\n❌ React with a ❌ if you can't make it."
+            )
+            await msg.add_reaction("✅")
+            await msg.add_reaction("❌")
+            previous_week_messages.append(msg.id)
+
+# ✅ Check if bot missed the scheduled post
 async def check_missed_schedule():
     london = pytz.timezone("Europe/London")
     now = datetime.now(london)
 
-    # Load last post time from a file or variable
     try:
         with open("last_schedule_time.txt", "r") as f:
             last_run_str = f.read().strip()
@@ -39,10 +80,9 @@ async def check_missed_schedule():
     except (FileNotFoundError, ValueError):
         last_run = None
 
-    # If it's Sunday after 9am and the post hasn't been sent today
     if now.weekday() == 6 and now.hour >= 9:
         if not last_run or last_run.date() != now.date():
-            await schedule_weekly_posts_function()  # Your post logic here
+            await schedule_weekly_posts_function()
             with open("last_schedule_time.txt", "w") as f:
                 f.write(now.strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -90,45 +130,9 @@ async def on_raw_reaction_add(payload):
         )
 
 # Tasks
-@tasks.loop(hours=168)  # Every 7 days
+@tasks.loop(hours=168)
 async def schedule_weekly_posts():
-    london = pytz.timezone("Europe/London")
-    now = datetime.now(london)
-
-    if now.hour == 9:
-        channel = bot.get_channel(CHANNEL_ID)
-
-        # 🧹 Delete previous week's messages if it's Sunday
-        if now.weekday() == 6 and previous_week_messages:
-            for msg_id in previous_week_messages:
-                try:
-                    msg = await channel.fetch_message(msg_id)
-                    await msg.delete()
-                except discord.NotFound:
-                    pass
-            previous_week_messages.clear()
-
-        organiser_id = bot.user.id
-        scores[organiser_id] = scores.get(organiser_id, 0) + 7
-
-        for i in range(7):
-            raid_date = now + timedelta(days=i)
-            date_str = raid_date.strftime("%A, %d %B")
-            fireteams[date_str] = []
-            backups[date_str] = []
-
-            msg = await channel.send(
-                f"@everyone\n🔥 CLAN RAID EVENT: Desert Perpetual 🔥\n"
-                f"🗓️ Day: {date_str} | 🕗 Time: 20:00 BST\n\n"
-                f"🎯 Fireteam Lineup (6 Players):\n" +
-                "\n".join([f"{i+1}. Empty Slot" for i in range(6)]) +
-                "\n\n🛡️ Backup Players (2):\n" +
-                "\n".join([f"{i+1}. Empty Slot" for i in range(2)]) +
-                "\n\n✅ React with a ✅ if you can join this raid.\n❌ React with a ❌ if you can't make it."
-            )
-            await msg.add_reaction("✅")
-            await msg.add_reaction("❌")
-            previous_week_messages.append(msg.id)
+    await schedule_weekly_posts_function()
 
 @tasks.loop(minutes=1)
 async def send_reminders():
@@ -219,3 +223,4 @@ if not token:
     exit()
 
 bot.run(token)
+
