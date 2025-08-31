@@ -96,6 +96,14 @@ async def schedule_weekly_posts_function():
                 pass
         previous_week_messages.clear()
 
+    # Build a set of dates already posted
+    posted_dates = set()
+    async for msg in channel.history(limit=200):
+        if msg.author == bot.user and "CLAN RAID EVENT: Desert Perpetual" in msg.content:
+            m = re.search(r"Day:\s*(.+?)\s*\|", msg.content)
+            if m:
+                posted_dates.add(m.group(1).strip())
+
     # Post for the next 7 days
     for i in range(7):
         raid_date = now + timedelta(days=i)
@@ -236,8 +244,11 @@ async def on_raw_reaction_remove(payload):
         return
     date_str = match.group(1).strip()
 
-    guild = bot.get_guild(payload.guild_id)
-    member = guild.get_member(payload.user_id)
+    async with lock:
+        ft = fireteams.get(date_str, [])
+        bu = backups.get(date_str, [])
+        guild = bot.get_guild(payload.guild_id)
+        member = guild.get_member(payload.user_id)
 
     removed = False
     if member.id in fireteams.get(date_str, []):
