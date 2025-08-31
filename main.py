@@ -72,19 +72,27 @@ async def schedule_weekly_posts_function():
 async def check_missed_schedule():
     london = pytz.timezone("Europe/London")
     now = datetime.now(london)
+    print(f"🔍 check_missed_schedule() called at {now}"
 
     try:
         with open("last_schedule_time.txt", "r") as f:
             last_run_str = f.read().strip()
             last_run = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
     except (FileNotFoundError, ValueError):
+        print("⚠️ No valid last_schedule_time.txt found.")
         last_run = None
 
     if now.weekday() == 6 and now.hour >= 9:
         if not last_run or last_run.date() != now.date():
+            print("✅ Missed schedule detected — posting now.")
             await schedule_weekly_posts_function()
             with open("last_schedule_time.txt", "w") as f:
-                f.write(now.strftime("%Y-%m-%d %H:%M:%S"))
+                f.write(now.strftime("%Y-%m-%d %H:%M:%S"))                
+        else:
+            print("⏳ Already posted today — skipping.")
+    else:
+        print("🕘 Not Sunday after 9am — skipping.")
+
 
 # Events
 @bot.event
