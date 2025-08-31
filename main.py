@@ -1,6 +1,4 @@
-
 import os
-import json
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
@@ -28,22 +26,6 @@ user_scores = {}  # Dice game scores
 previous_week_messages = []  # Message IDs to delete
 
 CHANNEL_ID = 1209484610568720384  # Raid channel ID
-
-# Persistent storage functions
-def load_data():
-    global fireteams, backups
-    if os.path.exists("fireteams.json"):
-        with open("fireteams.json", "r") as f:
-            fireteams = {k: v for k, v in json.load(f).items()}
-    if os.path.exists("backups.json"):
-        with open("backups.json", "r") as f:
-            backups = {k: v for k, v in json.load(f).items()}
-
-def save_data():
-    with open("fireteams.json", "w") as f:
-        json.dump(fireteams, f)
-    with open("backups.json", "w") as f:
-        json.dump(backups, f)
 
 # ✅ Helper function to post weekly raid schedule
 async def schedule_weekly_posts_function():
@@ -105,8 +87,6 @@ async def schedule_weekly_posts_function():
         except Exception as e:
             print(f"❌ Failed to post message for {date_str}: {e}")
 
-    save_data()
-
 # ✅ Check if bot missed the scheduled post
 async def check_missed_schedule():
     london = pytz.timezone("Europe/London")
@@ -133,10 +113,10 @@ async def check_missed_schedule():
     else:
         print("🕘 Not Sunday after 9am — skipping.")
 
+# Events
 @bot.event
 async def on_ready():
     print(f"✅ Bot started at {datetime.now()} as {bot.user}")
-    load_data()
     schedule_weekly_posts.start()
     send_reminders.start()
     await check_missed_schedule()
@@ -144,6 +124,9 @@ async def on_ready():
 @bot.event
 async def on_command_error(ctx, error):
     print(f"⚠️ Command error: {error}")
+
+
+import re
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -163,12 +146,15 @@ async def on_raw_reaction_add(payload):
 
     date_str = match.group(1).strip()
 
+    # Ensure fireteams and backups are initialized
     if date_str not in fireteams:
         fireteams[date_str] = []
     if date_str not in backups:
         backups[date_str] = []
 
+    # ✅ Reaction handling
     if payload.emoji.name == "✅":
+        # Prevent duplicate signups
         if member.id in fireteams[date_str] or member.id in backups[date_str]:
             return
 
@@ -205,6 +191,7 @@ async def on_raw_reaction_add(payload):
                 "Thanks for letting us know — hope to see you in the next raid!"
             )
 
+    # ✅ Update the original message with current player names
     fireteam_names = []
     for i in range(6):
         if i < len(fireteams[date_str]):
@@ -232,11 +219,12 @@ async def on_raw_reaction_add(payload):
     )
 
     await message.edit(content=new_content)
-    save_data()
 
+# Tasks
 @tasks.loop(hours=168)
 async def schedule_weekly_posts():
     await schedule_weekly_posts_function()
+
 
 @tasks.loop(minutes=1)
 async def send_reminders():
@@ -245,9 +233,13 @@ async def send_reminders():
 
     for date_str, players in fireteams.items():
         try:
+            # Clean the date string to remove leading asterisks or whitespace
             cleaned_date_str = date_str.lstrip("* ").strip()
+
+            # Parse the cleaned date string
             raid_time = datetime.strptime(cleaned_date_str, "%A, %d %B").replace(hour=19, minute=0)
 
+            # Compare current time with raid time
             if now.strftime("%A, %d %B %H:%M") == raid_time.strftime("%A, %d %B %H:%M"):
                 for user_id in players:
                     user = await bot.fetch_user(user_id)
@@ -259,8 +251,76 @@ async def send_reminders():
 
         except ValueError as e:
             print(f"[send_reminders] Date parsing error for '{date_str}': {e}")
+            # Optionally notify admins or log to a channel
         except Exception as e:
             print(f"[send_reminders] Unexpected error: {e}")
+
+# Commands
+@bot.command(name="Raidleaderboard")
+async def Raidleaderboard(ctx):
+    if not scores:
+        await ctx.send("No scores yet. Start raiding to earn points!")
+        return
+
+    bot_id = bot.user.id
+    sorted_scores = sorted(
+        [(uid, pts) for uid, pts in scores.items() if uid != bot_id],
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    if not sorted_scores:
+        await ctx.send("No player scores yet. Get involved in raids to earn points!")
+        return
+
+    leaderboard = []
+    for user_id, points in sorted_scores:
+        user = await bot.fetch_user(user_id)
+        leaderboard.append(f"**{user.name}**: {points} point{'s' if points != 1 else ''}")
+
+    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(leaderboard))
+
+@bot.command(name="roll")
+async def roll_dice(ctx, sides: int = 6):
+    channel_name = ctx.channel.name if ctx.channel.name else "Unknown"
+    print(f"ROLL command triggered by {ctx.author} in {channel_name} at {datetime.now()}")
+
+    allowed_channel_id = 1409621956336287774
+
+    if ctx.channel.id != allowed_channel_id:
+        await ctx.send("❌ This command can only be used in the designated dice game channel.")
+        return
+
+    if sides < 2:
+        await ctx.send("Dice must have at least 2 sides!")
+        return
+
+    result = random.randint(1, sides)
+    user_id = str(ctx.author.id)
+    user_name = ctx.author.display_name
+
+    if user_id not in user_scores:
+        user_scores[user_id] = {"name": user_name, "score": 0}
+    user_scores[user_id]["score"] += result
+    
+    print(f"Sending roll result to {ctx.author.display_name}")
+
+    await ctx.send(f"🎲 {user_name} rolled a {result} on a {sides}-sided die! Total score: {user_scores[user_id]['score']}")
+
+@bot.command(name="leaderboard")
+async def show_leaderboard(ctx):
+    if not user_scores:
+        await ctx.send("No scores yet! Roll the dice with `!roll`.")
+        return
+
+    sorted_scores = sorted(user_scores.values(), key=lambda x: x["score"], reverse=True)
+    top_players = sorted_scores[:5]
+
+    leaderboard = "**🏆 Leaderboard 🏆**\n"
+    for i, player in enumerate(top_players, start=1):
+        leaderboard += f"{i}. {player['name']} - {player['score']} points\n"
+
+    await ctx.send(leaderboard)
 
 # Run bot
 token = os.getenv("DISCORD_TOKEN")
@@ -269,6 +329,7 @@ if not token:
     exit()
 
 bot.run(token)
+
 
 
 
