@@ -148,6 +148,10 @@ async def on_ready():
     sunday_scheduler.start()
     send_reminders.start()
 
+    # If we restarted and have no previous raid-post IDs, post the week's raids immediately.
+    if not previous_week_messages:
+        logging.info("No existing raid posts found on startup – posting initial week block.")
+        await schedule_weekly_posts_function()
 
 # —————————————————————————————————————————
 # Reactions: ✅ join / ❌ leave
