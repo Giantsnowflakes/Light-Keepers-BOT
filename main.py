@@ -132,6 +132,7 @@ async def check_missed_schedule():
 # ————————
 @bot.event
 async def on_ready():
+        print("✅ on_ready fired – bot is up as", bot.user)
     logging.info(f"Bot started as {bot.user}")
     schedule_weekly_posts.start()
     send_reminders.start()
@@ -326,6 +327,7 @@ async def show_leaderboard(ctx):
 # ————————
 # Run Bot
 # ————————
+print("» Using Discord token:", repr(token))
 token = os.getenv("DISCORD_TOKEN")
 if not token:
     logging.error("DISCORD_TOKEN is missing.")
