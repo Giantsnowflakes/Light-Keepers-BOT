@@ -137,11 +137,18 @@ async def on_raw_reaction_add(payload):
     channel = bot.get_channel(payload.channel_id)
     message = await channel.fetch_message(payload.message_id)
 
+
     date_line = next((line for line in message.content.split("\n") if "Day:" in line), None)
-    if not date_line:
+    if not date_line or "Day: " not in date_line:
+        print("⚠️ Could not extract date from message.")
         return
 
-    date_str = date_line.split("Day: ")[1].split(" |")[0]
+    try:
+        date_str = date_line.split("Day: ")[1].split(" |")[0]
+    except IndexError:
+        print("⚠️ Date line format is invalid.")
+        return
+
 
     # ✅ Ensure fireteams and backups are initialized
     if date_str not in fireteams:
