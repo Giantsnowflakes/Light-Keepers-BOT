@@ -29,55 +29,56 @@ previous_week_messages = []  # Message IDs to delete
 CHANNEL_ID = 1209484610568720384  # Raid channel ID
 
 # ✅ Helper function to post weekly raid schedule
+
 async def schedule_weekly_posts_function():
     london = pytz.timezone("Europe/London")
     now = datetime.now(london)
     print(f"📅 Running schedule_weekly_posts_function at {now}")
 
-        channel = bot.get_channel(CHANNEL_ID)
-        if not channel:
-            print(f"❌ Could not find channel with ID {CHANNEL_ID}")
-            return
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel:
+        print(f"❌ Could not find channel with ID {CHANNEL_ID}")
+        return
 
-        print(f"📨 Found channel: {channel.name} (ID: {channel.id})")
+    print(f"📨 Found channel: {channel.name} (ID: {channel.id})")
 
-        # 🧹 Delete previous week's messages if it's Sunday
-        if now.weekday() == 6 and previous_week_messages:
-            print("🧹 Deleting previous week's messages...")
-            for msg_id in previous_week_messages:
-                try:
-                    msg = await channel.fetch_message(msg_id)
-                    await msg.delete()
-                    print(f"🗑️ Deleted message ID {msg_id}")
-                except discord.NotFound:
-                    print(f"⚠️ Message ID {msg_id} not found.")
-            previous_week_messages.clear()
-
-        organiser_id = bot.user.id
-        scores[organiser_id] = scores.get(organiser_id, 0) + 7
-
-        for i in range(7):
-            raid_date = now + timedelta(days=i)
-            date_str = raid_date.strftime("%A, %d %B")
-            fireteams[date_str] = []
-            backups[date_str] = []
-
+    # 🧹 Delete previous week's messages if it's Sunday
+    if now.weekday() == 6 and previous_week_messages:
+        print("🧹 Deleting previous week's messages...")
+        for msg_id in previous_week_messages:
             try:
-                msg = await channel.send(
-                    f"@everyone\n🔥 CLAN RAID EVENT: Desert Perpetual 🔥\n"
-                    f"🗓️ Day: {date_str} | 🕗 Time: 20:00 BST\n\n"
-                    f"🎯 Fireteam Lineup (6 Players):\n" +
-                    "\n".join([f"{i+1}. Empty Slot" for i in range(6)]) +
-                    "\n\n🛡️ Backup Players (2):\n" +
-                    "\n".join([f"{i+1}. Empty Slot" for i in range(2)]) +
-                    "\n\n✅ React with a ✅ if you can join this raid.\n❌ React with a ❌ if you can't make it."
-                )
-                await msg.add_reaction("✅")
-                await msg.add_reaction("❌")
-                previous_week_messages.append(msg.id)
-                print(f"✅ Posted raid message for {date_str}")
-            except Exception as e:
-                print(f"❌ Failed to post message for {date_str}: {e}")
+                msg = await channel.fetch_message(msg_id)
+                await msg.delete()
+                print(f"🗑️ Deleted message ID {msg_id}")
+            except discord.NotFound:
+                print(f"⚠️ Message ID {msg_id} not found.")
+        previous_week_messages.clear()
+
+    organiser_id = bot.user.id
+    scores[organiser_id] = scores.get(organiser_id, 0) + 7
+
+    for i in range(7):
+        raid_date = now + timedelta(days=i)
+        date_str = raid_date.strftime("%A, %d %B")
+        fireteams[date_str] = []
+        backups[date_str] = []
+
+        try:
+            msg = await channel.send(
+                f"@everyone\n🔥 CLAN RAID EVENT: Desert Perpetual 🔥\n"
+                f"🗓️ Day: {date_str} | 🕗 Time: 20:00 BST\n\n"
+                f"🎯 Fireteam Lineup (6 Players):\n" +
+                "\n".join([f"{i+1}. Empty Slot" for i in range(6)]) +
+                "\n\n🛡️ Backup Players (2):\n" +
+                "\n".join([f"{i+1}. Empty Slot" for i in range(2)]) +
+                "\n\n✅ React with a ✅ if you can join this raid.\n❌ React with a ❌ if you can't make it."
+            )
+            await msg.add_reaction("✅")
+            await msg.add_reaction("❌")
+            previous_week_messages.append(msg.id)
+            print(f"✅ Posted raid message for {date_str}")
+        except Exception as e:
+            print(f"❌ Failed to post message for {date_str}: {e}")
 
 # ✅ Check if bot missed the scheduled post
 async def check_missed_schedule():
