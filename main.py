@@ -29,7 +29,6 @@ previous_week_messages = []  # Message IDs to delete
 CHANNEL_ID = 1209484610568720384  # Raid channel ID
 
 # ✅ Helper function to post weekly raid schedule
-
 async def schedule_weekly_posts_function():
     london = pytz.timezone("Europe/London")
     now = datetime.now(london)
@@ -57,9 +56,18 @@ async def schedule_weekly_posts_function():
     organiser_id = bot.user.id
     scores[organiser_id] = scores.get(organiser_id, 0) + 7
 
+    # Fetch recent messages to check for duplicates
+    recent_messages = [msg async for msg in channel.history(limit=100)]
+
     for i in range(7):
         raid_date = now + timedelta(days=i)
         date_str = raid_date.strftime("%A, %d %B")
+
+        # Check if a message for this date already exists
+        if any(date_str in msg.content for msg in recent_messages):
+            print(f"⏳ Skipping {date_str} — already posted.")
+            continue
+
         fireteams[date_str] = []
         backups[date_str] = []
 
