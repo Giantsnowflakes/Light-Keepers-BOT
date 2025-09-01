@@ -38,48 +38,49 @@ CHANNEL_ID = 1209484610568720384  # your raid channel ID
 # Helper: Build the exact raid message text
 # —————————————————————————————————————————
 async def build_raid_message(date_str: str) -> str:
-    fire_ids = fireteams.get(date_str, [])
-    backup_ids = backups.get(date_str, [])
+    fire_slots = fireteams.get(date_str, {})
+    backup_slots = backups.get(date_str, {})
 
     lines = [
         "@everyone",
         "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
         "",
         f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
+        "🎮 **Activity:** Nightfall Strike – Lightfall Edition",
         "",
         "🎯 **Fireteam Lineup (6 Players):**"
     ]
 
-    # main slots
+    # Fireteam slots
     for i in range(6):
-        if i < len(fire_ids):
-            user = await bot.fetch_user(fire_ids[i])
+        uid = fire_slots.get(i)
+        if uid:
+            user = await bot.fetch_user(uid)
             lines.append(f"{i+1}. {user.display_name}")
         else:
             lines.append(f"{i+1}. Empty Slot")
 
-    lines.append("")  # spacer
+    lines.append("")
     lines.append("🛡️ **Backup Players (2):**")
 
-    # backup slots
+    # Backup slots
     for i in range(2):
-        if i < len(backup_ids):
-            user = await bot.fetch_user(backup_ids[i])
-            lines.append(f"{i+1}. {user.display_name}")
+        uid = backup_slots.get(i)
+        if uid:
+            user = await bot.fetch_user(uid)
+            lines.append(f"Backup {i+1}: {user.display_name}")
         else:
-            lines.append(f"{i+1}. Empty Slot")
+            lines.append(f"Backup {i+1}: Empty")
 
     lines.extend([
         "",
         "✅ React with a ✅ if you're joining the raid.",
         "❌ React with a ❌ if you can't make it.",
         "",
-        "Let’s assemble a legendary team and conquer the Desert Perpetual!"
+        "⚔️ Let’s assemble a legendary team and conquer the Desert Perpetual!"
     ])
 
     return "\n".join(lines)
-
-
 # —————————————————————————————————————————
 # Core Scheduler: Run once each Sunday at 09:00 BST
 # —————————————————————————————————————————
