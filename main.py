@@ -176,89 +176,101 @@ def extract_date(content: str) -> str | None:
     m = re.search(r"\*\*Day:\*\*\s*(.+?)\s*\|", content)
     return m.group(1).strip() if m else None
 
+fireteams = {}  # {date_str: {slot_index: user_id}}
+backups = {}    # {date_str: {slot_index: user_id}}
+lock = asyncio.Lock()
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.user_id == bot.user.id or payload.channel_id != CHANNEL_ID:
-        return
-    if payload.emoji.name not in ("✅", "❌"):
+    if payload.user_id == bot.user.id:
         return
 
-    channel = bot.get_channel(payload.channel_id)
-    message = await channel.fetch_message(payload.message_id)
-    if message.author != bot.user:
-        return
-
-    date_str = extract_date(message.content)
-    if not date_str:
-        return
+    guild = bot.get_guild(payload.guild_id)
+    member = guild.get_member(payload.user_id)
+    emoji = str(payload.emoji)
 
     async with lock:
-        ft = fireteams.setdefault(date_str, [])
-        bu = backups.setdefault(date_str, [])
-        guild = bot.get_guild(payload.guild_id)
-        member = guild.get_member(payload.user_id)
+        date_str = get_date_from_message_id(payload.message_id)  # Your method to get date
+        if date_str not in fireteams:
+            fireteams[date_str] = {}
+        if date_str not in backups:
+            backups[date_str] = {}
 
-        if payload.emoji.name == "✅":
-            if member.id in ft or member.id in bu:
+        # Remove if ❌
+        if emoji == "❌":
+            for slot, uid in list(fireteams[date_str].items()):
+                if uid == member.id:
+                    del fireteams[date_str][slot]
+            for slot, uid in list(backups[date_str].items()):
+                if uid == member.id:
+                    del backups[date_str][slot]
+        elif emoji == "✅":
+            # Prevent duplicates
+            if member.id in fireteams[date_str].values() or member.id in backups[date_str].values():
                 return
-            if len(ft) < 6:
-                ft.append(member.id)
-                await member.send(f"🎉 You’re in for {date_str} @ 20:00 BST!")
-            elif len(bu) < 2:
-                bu.append(member.id)
-                await member.send(f"🛡️ You’re on backup for {date_str}.")
+
+            # Assign to fireteam
+            for i in range(6):
+                if i not in fireteams[date_str]:
+                    fireteams[date_str][i] = member.id
+                    break
             else:
-                await member.send(f"⚠️ {date_str} is full (6 + 2).")
-        else:  # ❌
-            removed = False
-            if member.id in ft:
-                ft.remove(member.id)
-                removed = True
-            if member.id in bu:
-                bu.remove(member.id)
-                removed = True
-            if removed:
-                await member.send(f"❌ You’ve been removed from {date_str} raid/backups.")
+                # Assign to backup
+                for i in range(2):
+                    if i not in backups[date_str]:
+                        backups[date_str][i] = member.id
+                        break
+
+        await update_raid_message(payload.message_id, date_str)
+
 
     new_content = await build_raid_message(date_str)
     await message.edit(content=new_content)
 
-
 @bot.event
 async def on_raw_reaction_remove(payload):
-    if payload.user_id == bot.user.id or payload.channel_id != CHANNEL_ID:
-        return
-    if payload.emoji.name not in ("✅", "❌"):
+    if payload.user_id == bot.user.id:
         return
 
-    channel = bot.get_channel(payload.channel_id)
-    message = await channel.fetch_message(payload.message_id)
-    if message.author != bot.user:
-        return
-
-    date_str = extract_date(message.content)
-    if not date_str:
-        return
+    guild = bot.get_guild(payload.guild_id)
+    member = guild.get_member(payload.user_id)
 
     async with lock:
-        ft = fireteams.get(date_str, [])
-        bu = backups.get(date_str, [])
-        guild = bot.get_guild(payload.guild_id)
-        member = guild.get_member(payload.user_id)
+        date_str = get_date_from_message_id(payload.message_id)
+        if date_str in fireteams:
+            for slot, uid in list(fireteams[date_str].items()):
+                if uid == member.id:
+                    del fireteams[date_str][slot]
+        if date_str in backups:
+            for slot, uid in list(backups[date_str].items()):
+                if uid == member.id:
+                    del backups[date_str][slot]
 
-        removed = False
-        if member.id in ft:
-            ft.remove(member.id)
-            removed = True
-        if member.id in bu:
-            bu.remove(member.id)
-            removed = True
-        if removed:
-            await member.send(f"❌ You’ve been removed from {date_str} raid/backups.")
-            new_content = await build_raid_message(date_str)
-            await message.edit(content=new_content)
+        await update_raid_message(payload.message_id, date_str)
 
+async def update_raid_message(message_id, date_str):
+    channel = bot.get_channel(get_channel_id_from_message_id(message_id))
+    message = await channel.fetch_message(message_id)
+
+    lines = []
+    for i in range(6):
+        uid = fireteams[date_str].get(i)
+        if uid:
+            user = await bot.fetch_user(uid)
+            lines.append(f"{i+1}. {user.display_name}")
+        else:
+            lines.append(f"{i+1}. Empty Slot")
+
+    lines.append("\nBackups:")
+    for i in range(2):
+        uid = backups[date_str].get(i)
+        if uid:
+            user = await bot.fetch_user(uid)
+            lines.append(f"Backup {i+1}: {user.display_name}")
+        else:
+            lines.append(f"Backup {i+1}: Empty")
+
+    await message.edit(content="\n".join(lines))
 
 # —————————————————————————————————————————
 # Reminders: unchanged except for date regex
