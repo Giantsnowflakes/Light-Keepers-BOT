@@ -236,6 +236,13 @@ async def on_raw_reaction_add(payload):
                         print(f"{member.display_name} assigned to backup slot {i+1}")
                         break
 
+            # ✅ Send DM confirmation
+            if assigned:
+                try:
+                    await member.send(f"✅ You’re confirmed for the raid on **{date_str}** at 20:00 BST!")
+                except discord.Forbidden:
+                    logging.warning(f"Could not DM {member.display_name}")
+
         await update_raid_message(payload.message_id, date_str)
 
 @bot.event
@@ -307,6 +314,34 @@ async def update_raid_message(message_id, date_str):
     lines.append("⚔️ Let’s assemble a legendary team and conquer the Desert Perpetual!")
 
     await message.edit(content="\n".join(lines))
+
+async def reminder_loop():
+    await bot.wait_until_ready()
+    tz = pytz.timezone("Europe/London")
+
+    while not bot.is_closed():
+        now = datetime.now(tz)
+
+        for date_str in list(fireteams.keys()):
+            # Parse date string back into datetime
+            try:
+                raid_dt = datetime.strptime(date_str, "%A, %d %B").replace(
+                    year=now.year, hour=20, minute=0, tzinfo=tz
+                )
+            except ValueError:
+                continue
+
+            delta = raid_dt - now
+            if 59 <= delta.total_seconds() / 60 <= 61:  # ~1 hour before
+                # DM all players
+                for uid in list(fireteams[date_str].values()) + list(backups[date_str].values()):
+                    try:
+                        user = await bot.fetch_user(uid)
+                        await user.send(f"⏰ Reminder: Raid **{date_str}** starts in 1 hour at 20:00 BST!")
+                    except discord.Forbidden:
+                        logging.warning(f"Could not DM {user.display_name}")
+
+        await asyncio.sleep(60)  # Check every minute
 
 # —————————————————————————————————————————
 # Reminders: unchanged except for date regex
@@ -402,7 +437,7 @@ async def show_leaderboard(ctx):
         msg += f"{i}. {player['name']} – {player['score']} pts\n"
     await ctx.send(msg)
 
-
+bot.loop.create_task(reminder_loop())
 # —————————————————————————————————————————
 # Run Bot
 # —————————————————————————————————————————
