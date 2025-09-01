@@ -44,7 +44,6 @@ async def build_raid_message(date_str: str) -> str:
         "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
         "",
         f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
-        "🎮 **Activity:** Nightfall Strike – Lightfall Edition",
         "",
         "🎯 **Fireteam Lineup (6 Players):**"
     ]
@@ -271,7 +270,7 @@ async def on_raw_reaction_remove(payload):
         await update_raid_message(payload.message_id, date_str)
 
 async def update_raid_message(message_id, date_str):
-    channel = bot.get_channel(YOUR_CHANNEL_ID)  # Replace with your actual channel ID
+    channel = bot.get_channel(CHANNEL_ID)  # Replace with your actual channel ID
     message = await channel.fetch_message(message_id)
 
     lines = [
@@ -279,7 +278,6 @@ async def update_raid_message(message_id, date_str):
         "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
         "",
         f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
-        "🎮 **Activity:** Nightfall Strike – Lightfall Edition",
         "",
         "🎯 **Fireteam Lineup (6 Players):**"
     ]
