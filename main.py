@@ -157,6 +157,8 @@ async def on_ready():
     sunday_scheduler.start()
     send_reminders.start()
 
+    asyncio.create_task(reminder_loop())
+
     # If we restarted and have no previous raid-post IDs, post the week's raids immediately.
     if not previous_week_messages:
         logging.info("No existing raid posts found on startup – posting initial week block.")
@@ -437,7 +439,7 @@ async def show_leaderboard(ctx):
         msg += f"{i}. {player['name']} – {player['score']} pts\n"
     await ctx.send(msg)
 
-bot.loop.create_task(reminder_loop())
+
 # —————————————————————————————————————————
 # Run Bot
 # —————————————————————————————————————————
