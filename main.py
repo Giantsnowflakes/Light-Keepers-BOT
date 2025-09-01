@@ -40,7 +40,6 @@ async def build_raid_message(date_str: str) -> str:
     backup_slots = backups.get(date_str, {})
 
     lines = [
-        "@everyone",
         "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
         "",
         f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
@@ -205,10 +204,8 @@ async def on_raw_reaction_add(payload):
             print("Could not extract date from message.")
             return
 
-        if date_str not in fireteams:
-            fireteams[date_str] = {}
-        if date_str not in backups:
-            backups[date_str] = {}
+        fireteams.setdefault(date_str, {})
+        backups.setdefault(date_str, {})
 
         print(f"Reaction added: {emoji} by {member.display_name}")
 
@@ -226,16 +223,21 @@ async def on_raw_reaction_add(payload):
                 print(f"{member.display_name} is already assigned.")
                 return
 
+            assigned = False  # ✅ start as not assigned
+
             for i in range(6):
                 if i not in fireteams[date_str]:
                     fireteams[date_str][i] = member.id
                     print(f"{member.display_name} assigned to fireteam slot {i+1}")
+                    assigned = True
                     break
-            else:
+
+            if not assigned:
                 for i in range(2):
                     if i not in backups[date_str]:
                         backups[date_str][i] = member.id
                         print(f"{member.display_name} assigned to backup slot {i+1}")
+                        assigned = True
                         break
 
             # ✅ Send DM confirmation
@@ -283,7 +285,6 @@ async def update_raid_message(message_id, date_str):
     message = await channel.fetch_message(message_id)
 
     lines = [
-        "@everyone",
         "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
         "",
         f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
@@ -325,47 +326,43 @@ async def reminder_loop():
         now = datetime.now(tz)
 
         for date_str in list(fireteams.keys()):
-            # Parse date string back into datetime
             try:
+                # Find the original raid message for this date to extract the EVENT NAME
+                channel = bot.get_channel(CHANNEL_ID)
+                event_name = "the raid"
+
+                async for msg in channel.history(limit=200):
+                    if msg.author == bot.user and date_str in msg.content:
+                        # Look for the first line starting with 🔥 **CLAN RAID EVENT:
+                        for line in msg.content.splitlines():
+                            if line.strip().startswith("🔥 **CLAN RAID EVENT:"):
+                                # Extract the text between the colon and the final ** or emoji
+                                event_name = line.split("CLAN RAID EVENT:", 1)[1].strip(" 🔥*")
+                                break
+                        break
+
+                # Parse the raid start time
                 raid_dt = datetime.strptime(date_str, "%A, %d %B").replace(
                     year=now.year, hour=20, minute=0, tzinfo=tz
                 )
+
             except ValueError:
                 continue
 
             delta = raid_dt - now
             if 59 <= delta.total_seconds() / 60 <= 61:  # ~1 hour before
-                # DM all players
                 for uid in list(fireteams[date_str].values()) + list(backups[date_str].values()):
                     try:
                         user = await bot.fetch_user(uid)
-                        await user.send(f"⏰ Reminder: Raid **{date_str}** starts in 1 hour at 20:00 BST!")
+                        await user.send(
+                            f"⏰ **One hour to glory!**\n"
+                            f"🔥 The **{event_name}** kicks off on **{date_str}** at 20:00 BST.\n"
+                            f"🛡️ Gear up, rally your fireteam, and be ready to make history!"
+                        )
                     except discord.Forbidden:
                         logging.warning(f"Could not DM {user.display_name}")
 
         await asyncio.sleep(60)  # Check every minute
-
-# —————————————————————————————————————————
-# Reminders: unchanged except for date regex
-# —————————————————————————————————————————
-@tasks.loop(minutes=1)
-async def send_reminders():
-    tz = pytz.timezone("Europe/London")
-    now = datetime.now(tz)
-    for date_str, players in fireteams.items():
-        try:
-            dt = datetime.strptime(date_str, "%A, %d %B")\
-                     .replace(year=now.year, hour=19, minute=0)
-            if now.strftime("%A, %d %B %H:%M") == dt.strftime("%A, %d %B %H:%M"):
-                for uid in players:
-                    user = await bot.fetch_user(uid)
-                    await user.send(
-                        "⏳ One hour to go! See you at 20:00 BST for Desert Perpetual."
-                    )
-                    scores[uid] = scores.get(uid, 0) + 1
-        except Exception as e:
-            logging.warning(f"Reminder error for '{date_str}': {e}")
-
 
 # —————————————————————————————————————————
 # Commands (unchanged)
