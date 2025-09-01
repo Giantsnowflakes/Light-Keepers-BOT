@@ -233,10 +233,6 @@ async def on_raw_reaction_add(payload):
 
         await update_raid_message(payload.message_id, date_str)
 
-
-    new_content = await build_raid_message(date_str)
-    await message.edit(content=new_content)
-
 @bot.event
 async def on_raw_reaction_remove(payload):
     if payload.user_id == bot.user.id:
