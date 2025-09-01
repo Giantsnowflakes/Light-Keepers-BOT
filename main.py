@@ -265,10 +265,18 @@ async def on_raw_reaction_remove(payload):
         await update_raid_message(payload.message_id, date_str)
 
 async def update_raid_message(message_id, date_str):
-    channel = bot.get_channel(1209484610568720384) 
+    channel = bot.get_channel(YOUR_CHANNEL_ID)  # Replace with your actual channel ID
     message = await channel.fetch_message(message_id)
 
-    lines = []
+    lines = [
+        "@everyone",
+        "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
+        "",
+        f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
+        "🎮 **Activity:** Nightfall Strike – Lightfall Edition",
+        "",
+        "🎯 **Fireteam Lineup (6 Players):**"
+    ]
 
     for i in range(6):
         uid = fireteams[date_str].get(i)
@@ -278,7 +286,8 @@ async def update_raid_message(message_id, date_str):
         else:
             lines.append(f"{i+1}. Empty Slot")
 
-    lines.append("\nBackups:")
+    lines.append("")
+    lines.append("🛡️ **Backup Players (2):**")
     for i in range(2):
         uid = backups[date_str].get(i)
         if uid:
@@ -286,6 +295,12 @@ async def update_raid_message(message_id, date_str):
             lines.append(f"Backup {i+1}: {user.display_name}")
         else:
             lines.append(f"Backup {i+1}: Empty")
+
+    lines.append("")
+    lines.append("✅ React with a ✅ to join the raid")
+    lines.append("❌ React with a ❌ to opt out or remove yourself")
+    lines.append("")
+    lines.append("⚔️ Let’s assemble a legendary team and conquer the Desert Perpetual!")
 
     await message.edit(content="\n".join(lines))
 
