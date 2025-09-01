@@ -8,6 +8,10 @@ import logging
 import re
 import asyncio
 
+fireteams = {}  # { date_str: {slot_index: user_id} }
+backups = {}    # { date_str: {slot_index: user_id} }
+lock = asyncio.Lock()
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 
@@ -176,10 +180,6 @@ def extract_date(content: str) -> str | None:
     m = re.search(r"\*\*Day:\*\*\s*(.+?)\s*\|", content)
     return m.group(1).strip() if m else None
 
-fireteams = {}  # {date_str: {slot_index: user_id}}
-backups = {}    # {date_str: {slot_index: user_id}}
-lock = asyncio.Lock()
-
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
@@ -268,6 +268,31 @@ async def on_raw_reaction_remove(payload):
 
         await update_raid_message(payload.message_id, date_str)
 
+async def update_raid_message(message_id, date_str):
+    channel = bot.get_channel(1209484610568720384) 
+    message = await channel.fetch_message(message_id)
+
+    lines = []
+
+    for i in range(6):
+        uid = fireteams[date_str].get(i)
+        if uid:
+            user = await bot.fetch_user(uid)
+            lines.append(f"{i+1}. {user.display_name}")
+        else:
+            lines.append(f"{i+1}. Empty Slot")
+
+    lines.append("\nBackups:")
+    for i in range(2):
+        uid = backups[date_str].get(i)
+        if uid:
+            user = await bot.fetch_user(uid)
+            lines.append(f"Backup {i+1}: {user.display_name}")
+        else:
+            lines.append(f"Backup {i+1}: Empty")
+
+    await message.edit(content="\n".join(lines))
+
 # —————————————————————————————————————————
 # Reminders: unchanged except for date regex
 # —————————————————————————————————————————
@@ -306,6 +331,36 @@ async def Raidleaderboard(ctx):
         user = await bot.fetch_user(uid)
         lines.append(f"**{user.name}**: {pts} point{'s' if pts != 1 else ''}")
     await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(lines))
+
+@bot.command(name="showlineup")
+async def show_lineup(ctx, *, date_str: str):
+    if date_str not in fireteams and date_str not in backups:
+        await ctx.send(f"No lineup found for **{date_str}**.")
+        return
+
+    lines = [f"**Lineup for {date_str}:**"]
+
+    # Fireteam slots
+    lines.append("\nFireteam:")
+    for i in range(6):
+        uid = fireteams.get(date_str, {}).get(i)
+        if uid:
+            user = await bot.fetch_user(uid)
+            lines.append(f"{i+1}. {user.display_name}")
+        else:
+            lines.append(f"{i+1}. Empty Slot")
+
+    # Backup slots
+    lines.append("\nBackups:")
+    for i in range(2):
+        uid = backups.get(date_str, {}).get(i)
+        if uid:
+            user = await bot.fetch_user(uid)
+            lines.append(f"Backup {i+1}: {user.display_name}")
+        else:
+            lines.append(f"Backup {i+1}: Empty")
+
+    await ctx.send("\n".join(lines))
 
 
 @bot.command(name="roll")
