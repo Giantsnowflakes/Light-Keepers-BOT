@@ -26,8 +26,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 lock = asyncio.Lock()
 
 # Globals
-fireteams = {}                # { date_str: [user_id, …] }
-backups = {}                  # { date_str: [user_id, …] }
 scores = {}                   # { user_id: points }
 user_scores = {}              # dice‐game scores
 previous_week_messages = []   # IDs of last Sunday’s 7 posts
@@ -134,8 +132,15 @@ async def schedule_weekly_posts_function():
         if date_str in posted_dates:
             continue
 
-        fireteams.setdefault(date_str, [])
-        backups.setdefault(date_str, [])
+        # ✅ Safety check: convert old list data to dict
+        if isinstance(fireteams.get(date_str), list):
+            fireteams[date_str] = {}
+        if isinstance(backups.get(date_str), list):
+            backups[date_str] = {}
+
+        # ✅ Ensure slot-based dicts
+        fireteams.setdefault(date_str, {})
+        backups.setdefault(date_str, {})
 
         content = await build_raid_message(date_str)
         msg = await channel.send(content)
