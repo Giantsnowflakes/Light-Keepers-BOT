@@ -154,7 +154,6 @@ async def schedule_weekly_posts_function():
 async def on_ready():
     logging.info(f"Bot started as {bot.user}")
     sunday_scheduler.start()
-    send_reminders.start()
 
     asyncio.create_task(reminder_loop())
 
