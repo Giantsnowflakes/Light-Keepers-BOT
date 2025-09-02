@@ -296,7 +296,6 @@ async def update_raid_message(message_id, date_str):
         "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
         "",
         f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
-        "🎮 **Activity:** Nightfall Strike – Lightfall Edition",
         "",
         "🎯 **Fireteam Lineup (6 Players):**"
     ]
