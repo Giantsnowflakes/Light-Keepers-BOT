@@ -293,7 +293,7 @@ async def on_raw_reaction_add(payload):
                 except discord.Forbidden:
                     logging.warning(f"Could not DM {member.display_name}")
 
-            await update_raid_message(payload.message_id, 
+            await update_raid_message(payload.message_id,
                                       
 @bot.event
 async def on_raw_reaction_remove(payload):
