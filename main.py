@@ -432,31 +432,32 @@ async def reminder_loop():
                         break
 
 # Parse the raid start time
-try:
-    raid_dt = datetime.strptime(date_str, "%A, %d %B").replace(
-        year=now.year, hour=20, minute=0, tzinfo=tz
-    )
-    if raid_dt < now:
-        raid_dt = raid_dt.replace(year=now.year + 1)  # handles year rollover
+for date_str in fireteams:
+    try:
+        raid_dt = datetime.strptime(date_str, "%A, %d %B").replace(
+            year=now.year, hour=20, minute=0, tzinfo=tz
+        )
+        if raid_dt < now:
+            raid_dt = raid_dt.replace(year=now.year + 1)  # handles year rollover
 
-    delta = raid_dt - now
-    if 59 <= delta.total_seconds() / 60 <= 61:  # ~1 hour before
-        for uid in list(fireteams[date_str].values()) + list(backups[date_str].values()):
-            try:
-                user = await bot.fetch_user(uid)
-                user_tz = pytz.timezone(user_timezones.get(str(uid), "Europe/London"))
-                local_time = raid_dt.astimezone(user_tz)
-                event_time_str = local_time.strftime('%H:%M %Z')
+        delta = raid_dt - now
+        if 59 <= delta.total_seconds() / 60 <= 61:  # ~1 hour before
+            for uid in list(fireteams[date_str].values()) + list(backups[date_str].values()):
+                try:
+                    user = await bot.fetch_user(uid)
+                    user_tz = pytz.timezone(user_timezones.get(str(uid), "Europe/London"))
+                    local_time = raid_dt.astimezone(user_tz)
+                    event_time_str = local_time.strftime('%H:%M %Z')
 
-                await user.send(
-                    f"⏰ **One hour to glory!**\n"
-                    f"🔥 The **{event_name}** kicks off on **{date_str}** at **{event_time_str}**.\n"
-                    f"🛡️ Gear up, rally your fireteam, and be ready to make history!"
-                )
-            except discord.Forbidden:
-                logging.warning(f"Could not DM {user.display_name}")
-except ValueError:
-    continue
+                    await user.send(
+                        f"⏰ **One hour to glory!**\n"
+                        f"🔥 The **{event_name}** kicks off on **{date_str}** at **{event_time_str}**.\n"
+                        f"🛡️ Gear up, rally your fireteam, and be ready to make history!"
+                    )
+                except discord.Forbidden:
+                    logging.warning(f"Could not DM {user.display_name}")
+    except ValueError:
+        continue
 
 await asyncio.sleep(60)  # Check every minute
 
