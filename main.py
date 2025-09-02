@@ -216,7 +216,6 @@ def extract_date(content: str) -> str | None:
     m = re.search(r"\*\*Day:\*\*\s*(.+?)\s*\|", content)
     return m.group(1).strip() if m else None
 
-@bot.event
 member_cache = {}
 
 def is_already_signed_up(date_str, member_id):
