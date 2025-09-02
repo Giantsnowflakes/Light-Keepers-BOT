@@ -198,7 +198,6 @@ async def on_raw_reaction_add(payload):
         channel = bot.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
         date_str = extract_date(message.content)
-
         if not date_str:
             print("Could not extract date from message.")
             return
@@ -222,8 +221,9 @@ async def on_raw_reaction_add(payload):
                 print(f"{member.display_name} is already assigned.")
                 return
 
-            assigned = False  # ✅ start as not assigned
+            assigned = False
 
+            # Assign to first available fireteam slot (including slot 1)
             for i in range(6):
                 if i not in fireteams[date_str]:
                     fireteams[date_str][i] = member.id
@@ -231,6 +231,7 @@ async def on_raw_reaction_add(payload):
                     assigned = True
                     break
 
+            # If fireteam full, assign to backup
             if not assigned:
                 for i in range(2):
                     if i not in backups[date_str]:
@@ -239,14 +240,13 @@ async def on_raw_reaction_add(payload):
                         assigned = True
                         break
 
-            # ✅ Send DM confirmation
             if assigned:
                 try:
                     await member.send(f"✅ You’re confirmed for the raid on **{date_str}** at 20:00 BST!")
                 except discord.Forbidden:
                     logging.warning(f"Could not DM {member.display_name}")
 
-        await update_raid_message(payload.message_id, date_str)
+            await update_raid_message(payload.message_id, date_str)
 
 @bot.event
 async def on_raw_reaction_remove(payload):
@@ -255,29 +255,30 @@ async def on_raw_reaction_remove(payload):
 
     guild = bot.get_guild(payload.guild_id)
     member = guild.get_member(payload.user_id)
+    emoji = str(payload.emoji)
 
     async with lock:
         channel = bot.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
         date_str = extract_date(message.content)
-
         if not date_str:
             print("Could not extract date from message.")
             return
 
-        print(f"Reaction removed by {member.display_name}")
-        print(f"Removing {member.display_name} from all slots...")
+        fireteams.setdefault(date_str, {})
+        backups.setdefault(date_str, {})
 
-        if date_str in fireteams:
+        print(f"Reaction removed: {emoji} by {member.display_name}")
+
+        if emoji in ["✅", "❌"]:
             for slot, uid in list(fireteams[date_str].items()):
                 if uid == member.id:
                     del fireteams[date_str][slot]
-        if date_str in backups:
             for slot, uid in list(backups[date_str].items()):
                 if uid == member.id:
                     del backups[date_str][slot]
 
-        await update_raid_message(payload.message_id, date_str)
+            await update_raid_message(payload.message_id, date_str)
 
 async def update_raid_message(message_id, date_str):
     channel = bot.get_channel(CHANNEL_ID)
