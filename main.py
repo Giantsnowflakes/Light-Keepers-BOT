@@ -26,6 +26,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 lock = asyncio.Lock()
 
 # Globals
+recent_changes = {}           # Tracks who just joined or left for visual feedback
 scores = {}                   # { user_id: points }
 user_scores = {}              # dice‐game scores
 previous_week_messages = []   # IDs of last Sunday’s 7 posts
@@ -228,6 +229,7 @@ async def on_raw_reaction_add(payload):
                 if i not in fireteams[date_str]:
                     fireteams[date_str][i] = member.id
                     print(f"{member.display_name} assigned to fireteam slot {i+1}")
+                    recent_changes[member.id] = "joined"
                     assigned = True
                     break
 
@@ -237,6 +239,7 @@ async def on_raw_reaction_add(payload):
                     if i not in backups[date_str]:
                         backups[date_str][i] = member.id
                         print(f"{member.display_name} assigned to backup slot {i+1}")
+                        recent_changes[member.id] = "joined"
                         assigned = True
                         break
 
@@ -273,9 +276,11 @@ async def on_raw_reaction_remove(payload):
         if emoji in ["✅", "❌"]:
             for slot, uid in list(fireteams[date_str].items()):
                 if uid == member.id:
+                    recent_changes[uid] = f"left_{slot}"
                     del fireteams[date_str][slot]
             for slot, uid in list(backups[date_str].items()):
                 if uid == member.id:
+                    recent_changes[uid] = f"left_b{slot}"
                     del backups[date_str][slot]
 
             await update_raid_message(payload.message_id, date_str)
@@ -284,7 +289,6 @@ async def update_raid_message(message_id, date_str):
     channel = bot.get_channel(CHANNEL_ID)
     message = await channel.fetch_message(message_id)
 
-    # ✅ Ensure the date exists in memory as slot-based dicts
     fireteams.setdefault(date_str, {})
     backups.setdefault(date_str, {})
 
@@ -299,24 +303,40 @@ async def update_raid_message(message_id, date_str):
 
     # Fireteam slots
     for i in range(6):
-        uid = fireteams.get(date_str, {}).get(i)
+        uid = fireteams[date_str].get(i)
         if uid:
             user = await bot.fetch_user(uid)
-            lines.append(f"{i+1}. {user.display_name}")
+            name = user.display_name
+            if recent_changes.get(uid) == "joined":
+                lines.append(f"{i+1}. {name} ✅")
+            else:
+                lines.append(f"{i+1}. {name}")
         else:
-            lines.append(f"{i+1}. Empty Slot")
+            left_uid = next((uid for uid, status in recent_changes.items() if status == f"left_{i}"), None)
+            if left_uid:
+                lines.append(f"{i+1}. ❌ (just left)")
+            else:
+                lines.append(f"{i+1}. Empty Slot")
 
     lines.append("")
     lines.append("🛡️ **Backup Players (2):**")
 
     # Backup slots
     for i in range(2):
-        uid = backups.get(date_str, {}).get(i)
+        uid = backups[date_str].get(i)
         if uid:
             user = await bot.fetch_user(uid)
-            lines.append(f"Backup {i+1}: {user.display_name}")
+            name = user.display_name
+            if recent_changes.get(uid) == "joined":
+                lines.append(f"Backup {i+1}: {name} ✅")
+            else:
+                lines.append(f"Backup {i+1}: {name}")
         else:
-            lines.append(f"Backup {i+1}: Empty")
+            left_uid = next((uid for uid, status in recent_changes.items() if status == f"left_b{i}"), None)
+            if left_uid:
+                lines.append(f"Backup {i+1}: ❌ (just left)")
+            else:
+                lines.append(f"Backup {i+1}: Empty")
 
     lines.extend([
         "",
@@ -327,6 +347,8 @@ async def update_raid_message(message_id, date_str):
     ])
 
     await message.edit(content="\n".join(lines))
+
+    recent_changes.clear()  # Reset visual flags after update
 
 async def reminder_loop():
     await bot.wait_until_ready()
