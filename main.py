@@ -415,21 +415,27 @@ async def reminder_loop():
     while not bot.is_closed():
         now = datetime.now(tz)
 
-        for date_str in list(fireteams.keys()):
-            try:
-                # Find the original raid message for this date to extract the EVENT NAME
-                channel = bot.get_channel(CHANNEL_ID)
-                event_name = "the raid"
+for date_str in list(fireteams.keys()):
+    try:
+        # Find the original raid message for this date to extract the EVENT NAME
+        channel = bot.get_channel(CHANNEL_ID)
+        event_name = "the raid"
 
-                async for msg in channel.history(limit=200):
-                    if msg.author == bot.user and date_str in msg.content:
-                        # Look for the first line starting with 🔥 **CLAN RAID EVENT:
-                        for line in msg.content.splitlines():
-                            if line.strip().startswith("🔥 **CLAN RAID EVENT:"):
-                                # Extract the text between the colon and the final ** or emoji
-                                event_name = line.split("CLAN RAID EVENT:", 1)[1].strip(" 🔥*")
-                                break
+        async for msg in channel.history(limit=200):
+            if msg.author == bot.user and date_str in msg.content:
+                # Look for the first line starting with 🔥 **CLAN RAID EVENT:
+                for line in msg.content.splitlines():
+                    if line.strip().startswith("🔥 **CLAN RAID EVENT:"):
+                        # Extract the text between the colon and the final ** or emoji
+                        event_name = line.split("CLAN RAID EVENT:", 1)[1].strip(" 🔥*")
                         break
+                break
+
+        # Continue with your raid_dt parsing and reminder logic here...
+
+    except Exception as e:
+        logging.warning(f"Error processing date '{date_str}': {e}")
+        continue
 
 # Parse the raid start time
 for date_str in fireteams:
