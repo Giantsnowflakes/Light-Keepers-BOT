@@ -280,19 +280,26 @@ async def on_raw_reaction_remove(payload):
         await update_raid_message(payload.message_id, date_str)
 
 async def update_raid_message(message_id, date_str):
-    channel = bot.get_channel(CHANNEL_ID)  # Replace with your actual channel ID
+    channel = bot.get_channel(CHANNEL_ID)
     message = await channel.fetch_message(message_id)
 
+    # ✅ Ensure the date exists in memory as slot-based dicts
+    fireteams.setdefault(date_str, {})
+    backups.setdefault(date_str, {})
+
     lines = [
+        "@everyone",
         "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
         "",
         f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
+        "🎮 **Activity:** Nightfall Strike – Lightfall Edition",
         "",
         "🎯 **Fireteam Lineup (6 Players):**"
     ]
 
+    # Fireteam slots
     for i in range(6):
-        uid = fireteams[date_str].get(i)
+        uid = fireteams.get(date_str, {}).get(i)
         if uid:
             user = await bot.fetch_user(uid)
             lines.append(f"{i+1}. {user.display_name}")
@@ -301,19 +308,23 @@ async def update_raid_message(message_id, date_str):
 
     lines.append("")
     lines.append("🛡️ **Backup Players (2):**")
+
+    # Backup slots
     for i in range(2):
-        uid = backups[date_str].get(i)
+        uid = backups.get(date_str, {}).get(i)
         if uid:
             user = await bot.fetch_user(uid)
             lines.append(f"Backup {i+1}: {user.display_name}")
         else:
             lines.append(f"Backup {i+1}: Empty")
 
-    lines.append("")
-    lines.append("✅ React with a ✅ to join the raid")
-    lines.append("❌ React with a ❌ to opt out or remove yourself")
-    lines.append("")
-    lines.append("⚔️ Let’s assemble a legendary team and conquer the Desert Perpetual!")
+    lines.extend([
+        "",
+        "✅ React with a ✅ if you're joining the raid.",
+        "❌ React with a ❌ if you can't make it.",
+        "",
+        "⚔️ Let’s assemble a legendary team and conquer the Desert Perpetual!"
+    ])
 
     await message.edit(content="\n".join(lines))
 
