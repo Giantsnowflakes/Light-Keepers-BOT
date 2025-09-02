@@ -217,21 +217,38 @@ def extract_date(content: str) -> str | None:
     return m.group(1).strip() if m else None
 
 @bot.event
+member_cache = {}
+
+def is_already_signed_up(date_str, member_id):
+    return member_id in fireteams[date_str].values() or member_id in backups[date_str].values()
+
+async def get_member(guild, user_id):
+    if user_id in member_cache:
+        return member_cache[user_id]
+    member = guild.get_member(user_id)
+    if not member:
+        member = await guild.fetch_member(user_id)
+    member_cache[user_id] = member
+    return member
+
+async def notify_invalid_emoji(member):
+    try:
+        await member.send("Only ✅ or ❌ are used for raid signups. Try again with the right emoji!")
+    except discord.Forbidden:
+        logging.warning(f"Could not DM {member.display_name}")
+
+@bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
         return
 
     guild = bot.get_guild(payload.guild_id)
-    member = await guild.fetch_member(payload.user_id)
+    member = await get_member(guild, payload.user_id)
     emoji = str(payload.emoji)
 
-    # 🔒 Emoji validation — only respond to ✅ or ❌
+    # ✅ Emoji validation
     if emoji not in ["✅", "❌"]:
-        try:
-            member = await guild.fetch_member(payload.user_id)
-            await member.send("Only ✅ or ❌ are used for raid signups. Try again with the right emoji!")
-        except discord.Forbidden:
-            logging.warning(f"Could not DM {member.display_name}")
+        await notify_invalid_emoji(member)
         return
 
     async with lock:
@@ -255,9 +272,10 @@ async def on_raw_reaction_add(payload):
             for slot, uid in list(backups[date_str].items()):
                 if uid == member.id:
                     del backups[date_str][slot]
+            recent_changes[member.id] = "left"
 
         elif emoji == "✅":
-            if member.id in fireteams[date_str].values() or member.id in backups[date_str].values():
+            if is_already_signed_up(date_str, member.id):
                 if not ALLOW_OVERWRITE:
                     await member.send("You're already signed up. Remove your reaction first to change your slot.")
                     return
@@ -270,7 +288,7 @@ async def on_raw_reaction_add(payload):
             for i in range(6):
                 if i not in fireteams[date_str]:
                     fireteams[date_str][i] = member.id
-                    print(f"{member.display_name} assigned to fireteam slot {i+1}")
+                    print(f"{member.display_name} assigned to fireteam slot {i+1} ✨")
                     recent_changes[member.id] = "joined"
                     assigned = True
                     break
@@ -280,7 +298,7 @@ async def on_raw_reaction_add(payload):
                 for i in range(2):
                     if i not in backups[date_str]:
                         backups[date_str][i] = member.id
-                        print(f"{member.display_name} assigned to backup slot {i+1}")
+                        print(f"{member.display_name} assigned to backup slot {i+1} ✨")
                         recent_changes[member.id] = "joined"
                         assigned = True
                         break
@@ -293,8 +311,8 @@ async def on_raw_reaction_add(payload):
                 except discord.Forbidden:
                     logging.warning(f"Could not DM {member.display_name}")
 
-            await update_raid_message(payload.message_id, date_str):
-                                      
+        # Final update
+        await update_raid_message(payload.message_id, date_str)
 @bot.event
 async def on_raw_reaction_remove(payload):
     if payload.user_id == bot.user.id:
