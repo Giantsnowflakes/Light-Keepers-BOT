@@ -7,7 +7,36 @@ import random
 import logging
 import re
 import asyncio
+import json
 
+# === Configuration ===
+ALLOW_OVERWRITE = False  # Toggle for slot overwrite protection
+
+# === Caching & Timezones ===
+user_cache = {}
+
+async def get_cached_user(uid):
+    if uid not in user_cache:
+        user_cache[uid] = await bot.fetch_user(uid)
+    return user_cache[uid]
+
+user_timezones = {}  # { user_id: 'Europe/London' }
+
+TIMEZONE_FILE = "user_timezones.json"
+
+def load_timezones():
+    global user_timezones
+    try:
+        with open(TIMEZONE_FILE, "r") as f:
+            user_timezones = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        user_timezones = {}
+
+def save_timezones():
+    with open(TIMEZONE_FILE, "w") as f:
+        json.dump(user_timezones, f)
+
+# === Raid Data Structures ===
 fireteams = {}  # { date_str: {slot_index: user_id} }
 backups = {}    # { date_str: {slot_index: user_id} }
 lock = asyncio.Lock()
@@ -23,7 +52,6 @@ intents.members = True
 
 # Bot setup
 bot = commands.Bot(command_prefix="!", intents=intents)
-lock = asyncio.Lock()
 
 # Globals
 recent_changes = {}           # Tracks who just joined or left for visual feedback
@@ -52,7 +80,7 @@ async def build_raid_message(date_str: str) -> str:
     for i in range(6):
         uid = fire_slots.get(i)
         if uid:
-            user = await bot.fetch_user(uid)
+            user = await get_cached_user(uid)
             lines.append(f"{i+1}. {user.display_name}")
         else:
             lines.append(f"{i+1}. Empty Slot")
@@ -64,7 +92,7 @@ async def build_raid_message(date_str: str) -> str:
     for i in range(2):
         uid = backup_slots.get(i)
         if uid:
-            user = await bot.fetch_user(uid)
+            user = await get_cached_user(uid)
             lines.append(f"Backup {i+1}: {user.display_name}")
         else:
             lines.append(f"Backup {i+1}: Empty")
@@ -153,8 +181,10 @@ async def schedule_weekly_posts_function():
 # —————————————————————————————————————————
 @bot.event
 async def on_ready():
+    load_timezones()
     logging.info(f"Bot started as {bot.user}")
     sunday_scheduler.start()
+    print(f"Logged in as {bot.user}")
 
     asyncio.create_task(reminder_loop())
 
@@ -192,8 +222,17 @@ async def on_raw_reaction_add(payload):
         return
 
     guild = bot.get_guild(payload.guild_id)
-    member = guild.get_member(payload.user_id)
+    member = await guild.fetch_member(payload.user_id)
     emoji = str(payload.emoji)
+
+    # 🔒 Emoji validation — only respond to ✅ or ❌
+    if emoji not in ["✅", "❌"]:
+        try:
+            member = await guild.fetch_member(payload.user_id)
+            await member.send("Only ✅ or ❌ are used for raid signups. Try again with the right emoji!")
+        except discord.Forbidden:
+            logging.warning(f"Could not DM {member.display_name}")
+        return
 
     async with lock:
         channel = bot.get_channel(payload.channel_id)
@@ -219,12 +258,15 @@ async def on_raw_reaction_add(payload):
 
         elif emoji == "✅":
             if member.id in fireteams[date_str].values() or member.id in backups[date_str].values():
-                print(f"{member.display_name} is already assigned.")
-                return
+                if not ALLOW_OVERWRITE:
+                    await member.send("You're already signed up. Remove your reaction first to change your slot.")
+                    return
+                else:
+                    print(f"{member.display_name} is already assigned, but overwrite is allowed.")
 
             assigned = False
 
-            # Assign to first available fireteam slot (including slot 1)
+            # Assign to first available fireteam slot
             for i in range(6):
                 if i not in fireteams[date_str]:
                     fireteams[date_str][i] = member.id
@@ -242,6 +284,8 @@ async def on_raw_reaction_add(payload):
                         recent_changes[member.id] = "joined"
                         assigned = True
                         break
+                if assigned:
+                    await member.send("You're on the backup list for now — if a slot opens up, you'll be moved automatically!")
 
             if assigned:
                 try:
@@ -249,15 +293,15 @@ async def on_raw_reaction_add(payload):
                 except discord.Forbidden:
                     logging.warning(f"Could not DM {member.display_name}")
 
-            await update_raid_message(payload.message_id, date_str)
-
+            await update_raid_message(payload.message_id, 
+                                      
 @bot.event
 async def on_raw_reaction_remove(payload):
     if payload.user_id == bot.user.id:
         return
 
     guild = bot.get_guild(payload.guild_id)
-    member = guild.get_member(payload.user_id)
+    member = await guild.fetch_member(payload.user_id)
     emoji = str(payload.emoji)
 
     async with lock:
@@ -276,11 +320,9 @@ async def on_raw_reaction_remove(payload):
         if emoji in ["✅", "❌"]:
             for slot, uid in list(fireteams[date_str].items()):
                 if uid == member.id:
-                    recent_changes[uid] = f"left_{slot}"
                     del fireteams[date_str][slot]
             for slot, uid in list(backups[date_str].items()):
                 if uid == member.id:
-                    recent_changes[uid] = f"left_b{slot}"
                     del backups[date_str][slot]
 
             await update_raid_message(payload.message_id, date_str)
@@ -304,7 +346,7 @@ async def update_raid_message(message_id, date_str):
     for i in range(6):
         uid = fireteams[date_str].get(i)
         if uid:
-            user = await bot.fetch_user(uid)
+            user = await get_cached_user(uid)
             name = user.display_name
             if recent_changes.get(uid) == "joined":
                 lines.append(f"{i+1}. {name} ✅")
@@ -324,7 +366,7 @@ async def update_raid_message(message_id, date_str):
     for i in range(2):
         uid = backups[date_str].get(i)
         if uid:
-            user = await bot.fetch_user(uid)
+            user = await get_cached_user(uid)
             name = user.display_name
             if recent_changes.get(uid) == "joined":
                 lines.append(f"Backup {i+1}: {name} ✅")
@@ -373,10 +415,13 @@ async def reminder_loop():
                         break
 
                 # Parse the raid start time
-                raid_dt = datetime.strptime(date_str, "%A, %d %B").replace(
-                    year=now.year, hour=20, minute=0, tzinfo=tz
-                )
+            raid_dt = datetime.strptime(date_str, "%A, %d %B").replace(
+                year=now.year, hour=20, minute=0, tzinfo=tz
+            )
+            if raid_dt < now:
+                raid_dt = raid_dt.replace(year=now.year + 1)  # handles year rollover
 
+                
             except ValueError:
                 continue
 
@@ -385,9 +430,13 @@ async def reminder_loop():
                 for uid in list(fireteams[date_str].values()) + list(backups[date_str].values()):
                     try:
                         user = await bot.fetch_user(uid)
+                        user_tz = pytz.timezone(user_timezones.get(str(uid), "Europe/London"))
+                        local_time = raid_dt.astimezone(user_tz)
+                        event_time_str = local_time.strftime('%H:%M %Z')
+
                         await user.send(
                             f"⏰ **One hour to glory!**\n"
-                            f"🔥 The **{event_name}** kicks off on **{date_str}** at 20:00 BST.\n"
+                            f"🔥 The **{event_name}** kicks off on **{date_str}** at **{local_time_str}**.\n"
                             f"🛡️ Gear up, rally your fireteam, and be ready to make history!"
                         )
                     except discord.Forbidden:
@@ -425,7 +474,7 @@ async def show_lineup(ctx, *, date_str: str):
     for i in range(6):
         uid = fireteams.get(date_str, {}).get(i)
         if uid:
-            user = await bot.fetch_user(uid)
+            user = await get_cached_user(uid)
             lines.append(f"{i+1}. {user.display_name}")
         else:
             lines.append(f"{i+1}. Empty Slot")
@@ -435,13 +484,30 @@ async def show_lineup(ctx, *, date_str: str):
     for i in range(2):
         uid = backups.get(date_str, {}).get(i)
         if uid:
-            user = await bot.fetch_user(uid)
+            user = await get_cached_user(uid)
             lines.append(f"Backup {i+1}: {user.display_name}")
         else:
             lines.append(f"Backup {i+1}: Empty")
 
     await ctx.send("\n".join(lines))
 
+@bot.command()
+async def settimezone(ctx, tz_name):
+    try:
+        pytz.timezone(tz_name)  # validate
+        user_timezones[str(ctx.author.id)] = tz_name
+        save_timezones()
+        await ctx.send(f"✅ Timezone set to `{tz_name}` for {ctx.author.display_name}")
+    except pytz.UnknownTimeZoneError:
+        await ctx.send("❌ Invalid timezone name. Try something like `Europe/Paris` or `America/New_York`.")
+
+@bot.command()
+async def mytimezone(ctx):
+    tz = user_timezones.get(str(ctx.author.id))
+    if tz:
+        await ctx.send(f"🕒 Your timezone is set to `{tz}`.")
+    else:
+        await ctx.send("🌍 You haven’t set a timezone yet. Use `!settimezone <Region/City>` to set one.")
 
 @bot.command(name="roll")
 async def roll_dice(ctx, sides: int = 6):
