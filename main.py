@@ -9,6 +9,9 @@ import re
 import asyncio
 import json
 
+# === Dice Game Scores ===
+user_scores = {}
+
 # === Configuration ===
 ALLOW_OVERWRITE = False  # Toggle for slot overwrite protection
 
@@ -391,7 +394,21 @@ async def reminder_loop():
                     except discord.Forbidden:
                         logging.warning(f"Could not DM user {uid}")
         await asyncio.sleep(60)
+# —————————————————————————————————————————
+# Utility Functions for Dice game
+# —————————————————————————————————————————
+def load_scores():
+    if os.path.exists(SCORES_FILE):
+        with open(SCORES_FILE, "r") as f:
+            return json.load(f)
+    return {}
 
+def save_scores(scores):
+    with open(SCORES_FILE, "w") as f:
+        json.dump(scores, f)
+
+# 🧠 Global score store
+user_scores = load_scores()
 # —————————————————————————————————————————
 # Commands (unchanged)
 # —————————————————————————————————————————
@@ -457,30 +474,40 @@ async def mytimezone(ctx):
     else:
         await ctx.send("🌍 You haven’t set a timezone yet. Use `!settimezone <Region/City>` to set one.")
 
-@bot.command(name="roll")
-async def roll_dice(ctx, sides: int = 6):
-    if sides < 2:
-        return await ctx.send("Dice must have at least 2 sides!")
-    result = random.randint(1, sides)
+@bot.command()
+async def roll_dice(ctx):
     uid = str(ctx.author.id)
     user_scores.setdefault(uid, {"name": ctx.author.display_name, "score": 0})
-    user_scores[uid]["score"] += result
-    await ctx.send(
-        f"🎲 {ctx.author.display_name} rolled a {result}! "
-        f"Total score: {user_scores[uid]['score']}"
-    )
 
+    roll = random.randint(1, 6)
+    user_scores[uid]["score"] += roll
+    save_scores(user_scores)
 
-@bot.command(name="leaderboard")
-async def show_leaderboard(ctx):
+    # 🎉 Reactions based on roll
+    if roll == 6:
+        reaction = "🔥 Critical hit!"
+    elif roll == 1:
+        reaction = "😬 Oof... better luck next time."
+    else:
+        reaction = "🎲 Nice roll!"
+
+    await ctx.send(f"{ctx.author.mention} rolled a {roll}! Total score: {user_scores[uid]['score']}\n{reaction}")
+    
+@bot.command()
+async def leaderboard(ctx):
     if not user_scores:
-        return await ctx.send("No scores yet! Roll the dice with `!roll`.")
-    sorted_us = sorted(user_scores.values(), key=lambda x: x["score"], reverse=True)
-    msg = "**🏆 Dice Leaderboard 🏆**\n"
-    for i, player in enumerate(sorted_us[:5], start=1):
-        msg += f"{i}. {player['name']} – {player['score']} pts\n"
-    await ctx.send(msg)
+        await ctx.send("No scores yet! Be the first to roll 🎲")
+        return
 
+    # Sort by score descending
+    top_players = sorted(user_scores.items(), key=lambda x: x[1]["score"], reverse=True)[:5]
+
+    # Format leaderboard
+    leaderboard_text = "**🏆 Weekly Dice Leaderboard 🏆**\n"
+    for i, (uid, data) in enumerate(top_players, start=1):
+        leaderboard_text += f"{i}. {data['name']} — {data['score']} points\n"
+
+    await ctx.send(leaderboard_text)
 
 # —————————————————————————————————————————
 # Run Bot
