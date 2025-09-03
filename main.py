@@ -397,27 +397,90 @@ async def reminder_loop():
 # —————————————————————————————————————————
 @bot.command(name="Raidleaderboard")
 async def Raidleaderboard(ctx):
-    # … your existing code …
+    if not scores:
+        return await ctx.send("No scores yet. Start raiding to earn points!")
+    sorted_scores = sorted(
+        [(uid, pts) for uid, pts in scores.items() if uid != bot.user.id],
+        key=lambda x: x[1], reverse=True
+    )
+    lines = []
+    for uid, pts in sorted_scores:
+        user = await bot.fetch_user(uid)
+        lines.append(f"**{user.name}**: {pts} point{'s' if pts != 1 else ''}")
+    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(lines))
 
 @bot.command(name="showlineup")
 async def show_lineup(ctx, *, date_str: str):
-    # … your existing code …
+    if date_str not in fireteams and date_str not in backups:
+        await ctx.send(f"No lineup found for **{date_str}**.")
+        return
+
+    lines = [f"**Lineup for {date_str}:**"]
+
+    # Fireteam slots
+    lines.append("\nFireteam:")
+    for i in range(6):
+        uid = fireteams.get(date_str, {}).get(i)
+        if uid:
+            user = await get_cached_user(uid)
+            lines.append(f"{i+1}. {user.display_name}")
+        else:
+            lines.append(f"{i+1}. Empty Slot")
+
+    # Backup slots
+    lines.append("\nBackups:")
+    for i in range(2):
+        uid = backups.get(date_str, {}).get(i)
+        if uid:
+            user = await get_cached_user(uid)
+            lines.append(f"Backup {i+1}: {user.display_name}")
+        else:
+            lines.append(f"Backup {i+1}: Empty")
+
+    await ctx.send("\n".join(lines))
 
 @bot.command()
 async def settimezone(ctx, tz_name):
-    # … your existing code …
+    try:
+        pytz.timezone(tz_name)  # validate
+        user_timezones[str(ctx.author.id)] = tz_name
+        save_timezones()
+        await ctx.send(f"✅ Timezone set to `{tz_name}` for {ctx.author.display_name}")
+    except pytz.UnknownTimeZoneError:
+        await ctx.send("❌ Invalid timezone name. Try something like `Europe/Paris` or `America/New_York`.")
 
 @bot.command()
 async def mytimezone(ctx):
-    # … your existing code …
+    tz = user_timezones.get(str(ctx.author.id))
+    if tz:
+        await ctx.send(f"🕒 Your timezone is set to `{tz}`.")
+    else:
+        await ctx.send("🌍 You haven’t set a timezone yet. Use `!settimezone <Region/City>` to set one.")
 
 @bot.command(name="roll")
 async def roll_dice(ctx, sides: int = 6):
-    # … your existing code …
+    if sides < 2:
+        return await ctx.send("Dice must have at least 2 sides!")
+    result = random.randint(1, sides)
+    uid = str(ctx.author.id)
+    user_scores.setdefault(uid, {"name": ctx.author.display_name, "score": 0})
+    user_scores[uid]["score"] += result
+    await ctx.send(
+        f"🎲 {ctx.author.display_name} rolled a {result}! "
+        f"Total score: {user_scores[uid]['score']}"
+    )
+
 
 @bot.command(name="leaderboard")
 async def show_leaderboard(ctx):
-    # … your existing code …
+    if not user_scores:
+        return await ctx.send("No scores yet! Roll the dice with `!roll`.")
+    sorted_us = sorted(user_scores.values(), key=lambda x: x["score"], reverse=True)
+    msg = "**🏆 Dice Leaderboard 🏆**\n"
+    for i, player in enumerate(sorted_us[:5], start=1):
+        msg += f"{i}. {player['name']} – {player['score']} pts\n"
+    await ctx.send(msg)
+
 
 # —————————————————————————————————————————
 # Run Bot
