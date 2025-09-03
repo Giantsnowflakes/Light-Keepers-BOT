@@ -10,6 +10,7 @@ import asyncio
 import json
 
 # === Dice Game Scores ===
+SCORES_FILE = "scores.json"
 user_scores = {}
 
 # === Configuration ===
@@ -397,6 +398,9 @@ async def reminder_loop():
 # —————————————————————————————————————————
 # Utility Functions for Dice game
 # —————————————————————————————————————————
+# 🧠 Global score store
+user_scores = load_scores()
+
 def load_scores():
     if os.path.exists(SCORES_FILE):
         with open(SCORES_FILE, "r") as f:
