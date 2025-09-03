@@ -42,7 +42,7 @@ lock = asyncio.Lock()
 # In‐memory tracking for visual feedback & reminders
 recent_changes: dict[int, str] = {}  # user_id → "joined" or "left"
 previous_week_messages: list[int] = [] 
-last_schedule_date: datetime.date | None = None
+last_schedule_date = None
 
 # === Logging & Intents ===
 logging.basicConfig(level=logging.INFO)
