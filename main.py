@@ -477,7 +477,7 @@ async def mytimezone(ctx):
         await ctx.send("🌍 You haven’t set a timezone yet. Use `!settimezone <Region/City>` to set one.")
 
 @bot.command()
-async def roll_dice(ctx):
+async def roll(ctx):
     uid = str(ctx.author.id)
     user_scores.setdefault(uid, {"name": ctx.author.display_name, "score": 0})
 
