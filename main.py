@@ -38,10 +38,34 @@ def save_timezones():
     with open(TIMEZONE_FILE, "w") as f:
         json.dump(user_timezones, f)
 
+# === Raid Persistence ===
+RAIDS_FILE = "raids.json"
+
+def load_raids():
+    global fireteams, backups
+    try:
+        with open(RAIDS_FILE, "r") as f:
+            data = json.load(f)
+            fireteams = {k: {int(slot): v for slot, v in d.items()}
+                         for k, d in data.get("fireteams", {}).items()}
+            backups   = {k: {int(slot): v for slot, v in d.items()}
+                         for k, d in data.get("backups", {}).items()}
+    except (FileNotFoundError, json.JSONDecodeError):
+        fireteams = {}
+        backups   = {}
+
+def save_raids():
+    with open(RAIDS_FILE, "w") as f:
+        json.dump({
+            "fireteams": {k: v for k, v in fireteams.items()},
+            "backups":   {k: v for k, v in backups.items()}
+        }, f)
+
 # === Raid Data Structures ===
 fireteams: dict[str, dict[int, int]] = {}  # { date_str: {slot_index: user_id} }
 backups: dict[str, dict[int, int]] = {}    # { date_str: {slot_index: user_id} }
 lock = asyncio.Lock()
+slot_lock = asyncio.Lock()
 
 # In‐memory tracking for visual feedback & reminders
 recent_changes: dict[int, str] = {}  # user_id → "joined" or "left"
@@ -104,8 +128,10 @@ async def build_raid_message(date_str: str) -> str:
 @tasks.loop(minutes=1)
 async def sunday_scheduler():
     global last_schedule_date
-    tz = pytz.timezone("Europe/London")
+    tz  = pytz.timezone("Europe/London")
     now = datetime.now(tz)
+
+    # Only run once each Sunday at 09:00 BST
     if now.weekday() == 6 and now.hour == 9 and last_schedule_date != now.date():
         await schedule_weekly_posts_function()
         last_schedule_date = now.date()
@@ -113,14 +139,14 @@ async def sunday_scheduler():
         last_schedule_date = None
 
 async def schedule_weekly_posts_function():
-    tz = pytz.timezone("Europe/London")
-    now = datetime.now(tz)
+    tz      = pytz.timezone("Europe/London")
+    now     = datetime.now(tz)
     channel = bot.get_channel(CHANNEL_ID)
     if not channel:
         logging.error(f"Could not find channel {CHANNEL_ID}")
         return
 
-    # Delete old week
+    # 1) Delete messages from last week
     for msg_id in previous_week_messages:
         try:
             old = await channel.fetch_message(msg_id)
@@ -129,7 +155,20 @@ async def schedule_weekly_posts_function():
             pass
     previous_week_messages.clear()
 
-    # Avoid duplicate dates
+    # 2) Compute the coming week’s date strings
+    week_dates = {
+        (now + timedelta(days=i)).strftime("%A, %d %B")
+        for i in range(7)
+    }
+
+    # 3) Prune any dates outside this week, then persist
+    for date_str in list(fireteams):
+        if date_str not in week_dates:
+            fireteams.pop(date_str, None)
+            backups.pop(date_str,   None)
+    save_raids()
+
+    # 4) Detect which of this week’s dates are already posted
     posted_dates = set()
     async for m in channel.history(limit=200):
         if m.author == bot.user and "CLAN RAID EVENT" in m.content:
@@ -137,10 +176,8 @@ async def schedule_weekly_posts_function():
             if match:
                 posted_dates.add(match.group(1).strip())
 
-    # Post next 7 days
-    for delta in range(7):
-        raid_dt = now + timedelta(days=delta)
-        date_str = raid_dt.strftime("%A, %d %B")
+    # 5) Post any missing days and record their IDs
+    for date_str in sorted(week_dates):
         if date_str in posted_dates:
             continue
 
@@ -148,10 +185,14 @@ async def schedule_weekly_posts_function():
         backups.setdefault(date_str, {})
 
         content = await build_raid_message(date_str)
-        msg = await channel.send(content)
+        msg     = await channel.send(content)
         await msg.add_reaction("✅")
         await msg.add_reaction("❌")
         previous_week_messages.append(msg.id)
+
+    # 6) Persist again so newly scheduled slots survive restarts
+    save_raids()
+
 
 # —————————————————————————————————————————
 # Bot Events
@@ -159,6 +200,7 @@ async def schedule_weekly_posts_function():
 @bot.event
 async def on_ready():
     load_timezones()
+    load_raids()
     logging.info(f"Bot started as {bot.user}")
     sunday_scheduler.start()
     print(f"Logged in as {bot.user}")
@@ -185,9 +227,97 @@ async def on_resumed():
 # —————————————————————————————————————————
 # Reaction Handling: ✅ join / ❌ leave
 # —————————————————————————————————————————
+
 def extract_date(content: str) -> str | None:
     m = re.search(r"\*\*Day:\*\*\s*(.+?)\s*\|", content)
     return m.group(1).strip() if m else None
+
+async def handle_reaction_add(payload, member, message, date_str):
+    async with slot_lock:
+        fireteams.setdefault(date_str, {})
+        backups.setdefault(date_str, {})
+
+        already = member.id in fireteams[date_str].values() or member.id in backups[date_str].values()
+        if already and not ALLOW_OVERWRITE:
+            try:
+                await member.send("You're already signed up. Remove your reaction first to change your slot.")
+            except discord.Forbidden:
+                logging.warning(f"Could not DM {member.display_name}")
+            return
+
+        if already and ALLOW_OVERWRITE:
+            for d in (fireteams, backups):
+                for slot, uid in list(d[date_str].items()):
+                    if uid == member.id:
+                        del d[date_str][slot]
+
+        # Assign to fireteam first
+        assigned = False
+        for i in range(6):
+            if i not in fireteams[date_str]:
+                fireteams[date_str][i] = member.id
+                assigned = True
+                break
+
+        # If full, assign to backup
+        if not assigned:
+            for i in range(2):
+                if i not in backups[date_str]:
+                    backups[date_str][i] = member.id
+                    assigned = True
+                    break
+
+        recent_changes[member.id] = "joined"
+
+        try:
+            await member.send(f"✅ You’re confirmed for the raid on **{date_str}** at 20:00 BST!")
+            if not assigned:
+                await member.send("You're on the backup list for now — if a slot opens up, you'll be moved automatically!")
+        except discord.Forbidden:
+            logging.warning(f"Could not DM {member.display_name}")
+
+        await update_raid_message(message.id, date_str)
+        save_raids()
+
+
+
+async def handle_reaction_remove(payload, member, message, date_str):
+    async with slot_lock:
+        fireteams.setdefault(date_str, {})
+        backups.setdefault(date_str, {})
+
+        # Remove user from both lists
+        for slot, uid in list(fireteams[date_str].items()):
+            if uid == member.id:
+                del fireteams[date_str][slot]
+        for slot, uid in list(backups[date_str].items()):
+            if uid == member.id:
+                del backups[date_str][slot]
+
+        # Auto-promote backup if fireteam has space
+        promoted_uid = None
+        if len(fireteams[date_str]) < 6:
+            for i in range(2):
+                uid = backups[date_str].get(i)
+                if uid and uid not in fireteams[date_str].values():
+                    next_slot = max(fireteams[date_str].keys(), default=-1) + 1
+                    fireteams[date_str][next_slot] = uid
+                    del backups[date_str][i]
+                    recent_changes[uid] = "joined"
+                    promoted_uid = uid
+                    break
+
+        # Notify promoted user
+        if promoted_uid:
+            promoted_member = message.guild.get_member(promoted_uid)
+            if promoted_member:
+                try:
+                    await promoted_member.send(f"You’ve been promoted to the fireteam for {date_str}! 🎉 Get ready to raid.")
+                except discord.Forbidden:
+                    pass
+
+        recent_changes[member.id] = "left"
+        await update_raid_message(message.id, date_str)
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -198,11 +328,7 @@ async def on_raw_reaction_add(payload):
     member = await guild.fetch_member(payload.user_id)
     emoji = str(payload.emoji)
 
-    if emoji not in ["✅", "❌"]:
-        try:
-            await member.send("Only ✅ or ❌ are used for raid signups. Try again with the right emoji!")
-        except discord.Forbidden:
-            logging.warning(f"Could not DM {member.display_name}")
+    if emoji != "✅":
         return
 
     async with lock:
@@ -212,64 +338,8 @@ async def on_raw_reaction_add(payload):
         if not date_str:
             return
 
-        fireteams.setdefault(date_str, {})
-        backups.setdefault(date_str, {})
-        logging.info(f"Reaction {emoji} by {member.display_name} on {date_str}")
+    await handle_reaction_add(payload, member, message, date_str)
 
-        # ❌ remove from both lists
-        if emoji == "❌":
-            for slot, uid in list(fireteams[date_str].items()):
-                if uid == member.id:
-                    del fireteams[date_str][slot]
-            for slot, uid in list(backups[date_str].items()):
-                if uid == member.id:
-                    del backups[date_str][slot]
-            recent_changes[member.id] = "left"
-
-        # ✅ assign
-        if emoji == "✅":
-            already = member.id in fireteams[date_str].values() or member.id in backups[date_str].values()
-            if already and not ALLOW_OVERWRITE:
-                try:
-                    await member.send("You're already signed up. Remove your reaction first to change your slot.")
-                except discord.Forbidden:
-                    logging.warning(f"Could not DM {member.display_name}")
-                return
-
-            if already and ALLOW_OVERWRITE:
-                # remove old slot then proceed
-                for d in (fireteams, backups):
-                    for slot, uid in list(d[date_str].items()):
-                        if uid == member.id:
-                            del d[date_str][slot]
-
-            # fill a fireteam slot first
-            assigned = False
-            for i in range(6):
-                if i not in fireteams[date_str]:
-                    fireteams[date_str][i] = member.id
-                    assigned = True
-                    break
-
-            # if full, go to backups
-            if not assigned:
-                for i in range(2):
-                    if i not in backups[date_str]:
-                        backups[date_str][i] = member.id
-                        assigned = True
-                        break
-
-            recent_changes[member.id] = "joined"
-            # send DMs
-            try:
-                await member.send(f"✅ You’re confirmed for the raid on **{date_str}** at 20:00 BST!")
-                if not assigned:
-                    await member.send("You're on the backup list for now — if a slot opens up, you'll be moved automatically!")
-            except discord.Forbidden:
-                logging.warning(f"Could not DM {member.display_name}")
-
-        # finally, update the message
-        await update_raid_message(message.id, date_str)
 
 @bot.event
 async def on_raw_reaction_remove(payload):
@@ -280,7 +350,7 @@ async def on_raw_reaction_remove(payload):
     member = await guild.fetch_member(payload.user_id)
     emoji = str(payload.emoji)
 
-    if emoji not in ["✅", "❌"]:
+    if emoji != "❌":
         return
 
     async with lock:
@@ -290,15 +360,7 @@ async def on_raw_reaction_remove(payload):
         if not date_str:
             return
 
-        for slot, uid in list(fireteams[date_str].items()):
-            if uid == member.id:
-                del fireteams[date_str][slot]
-        for slot, uid in list(backups[date_str].items()):
-            if uid == member.id:
-                del backups[date_str][slot]
-
-        recent_changes[member.id] = "left"
-        await update_raid_message(message.id, date_str)
+    await handle_reaction_remove(payload, member, message, date_str)
 
 async def update_raid_message(message_id: int, date_str: str):
     channel = bot.get_channel(CHANNEL_ID)
