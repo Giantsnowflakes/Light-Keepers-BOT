@@ -393,9 +393,6 @@ async def update_raid_message(message_id: int, date_str: str):
     channel = bot.get_channel(CHANNEL_ID)
     message = await channel.fetch_message(message_id)
     
-    await message.edit(content=…)
-    recent_changes.clear()
-
     fireteams.setdefault(date_str, {})
     backups.setdefault(date_str, {})
 
