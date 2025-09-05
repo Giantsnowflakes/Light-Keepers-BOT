@@ -67,6 +67,21 @@ backups: dict[str, dict[int, int]] = {}    # { date_str: {slot_index: user_id} }
 lock = asyncio.Lock()
 slot_lock = asyncio.Lock()
 
+# —————————————————————————————————————————
+# Debounced Embed Updates
+# —————————————————————————————————————————
+update_tasks: dict[int, asyncio.Task] = {}
+
+def schedule_update(message_id: int, date_str: str):
+    if message_id in update_tasks:
+        update_tasks[message_id].cancel()
+    update_tasks[message_id] = asyncio.create_task(_debounced_update(message_id, date_str))
+
+async def _debounced_update(message_id: int, date_str: str):
+    await asyncio.sleep(1)   # wait for other reactions to settle
+    await update_raid_message(message_id, date_str)
+    update_tasks.pop(message_id, None)
+
 # In‐memory tracking for visual feedback & reminders
 recent_changes: dict[int, str] = {}  # user_id → "joined" or "left"
 previous_week_messages: list[int] = [] 
@@ -276,7 +291,7 @@ async def handle_reaction_add(payload, member, message, date_str):
         except discord.Forbidden:
             logging.warning(f"Could not DM {member.display_name}")
 
-        await update_raid_message(message.id, date_str)
+        schedule_update(message.id, date_str)
         save_raids()
 
 
@@ -317,7 +332,10 @@ async def handle_reaction_remove(payload, member, message, date_str):
                     pass
 
         recent_changes[member.id] = "left"
-        await update_raid_message(message.id, date_str)
+                
+        schedule_update(message.id, date_str)
+        save_raids()
+          
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -369,9 +387,14 @@ async def on_raw_reaction_remove(payload):
             return
 
     await handler(payload, member, message, date_str)
+    
 async def update_raid_message(message_id: int, date_str: str):
+    await asyncio.sleep(0.3)
     channel = bot.get_channel(CHANNEL_ID)
     message = await channel.fetch_message(message_id)
+        … rebuild embed …
+    await message.edit(content=…)
+    recent_changes.clear()
 
     fireteams.setdefault(date_str, {})
     backups.setdefault(date_str, {})
