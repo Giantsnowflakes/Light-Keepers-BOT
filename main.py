@@ -324,21 +324,26 @@ async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
         return
 
-    guild = bot.get_guild(payload.guild_id)
+    guild  = bot.get_guild(payload.guild_id)
     member = await guild.fetch_member(payload.user_id)
-    emoji = str(payload.emoji)
+    emoji  = str(payload.emoji)
 
-    if emoji != "✅":
+    # ✅ adds sign-up, ❌ triggers leave
+    if emoji == "✅":
+        handler = handle_reaction_add
+    elif emoji == "❌":
+        handler = handle_reaction_remove
+    else:
         return
 
     async with lock:
-        channel = bot.get_channel(payload.channel_id)
-        message = await channel.fetch_message(payload.message_id)
+        channel  = bot.get_channel(payload.channel_id)
+        message  = await channel.fetch_message(payload.message_id)
         date_str = extract_date(message.content)
         if not date_str:
             return
 
-    await handle_reaction_add(payload, member, message, date_str)
+    await handler(payload, member, message, date_str)
 
 
 @bot.event
@@ -346,22 +351,24 @@ async def on_raw_reaction_remove(payload):
     if payload.user_id == bot.user.id:
         return
 
-    guild = bot.get_guild(payload.guild_id)
+    guild  = bot.get_guild(payload.guild_id)
     member = await guild.fetch_member(payload.user_id)
-    emoji = str(payload.emoji)
+    emoji  = str(payload.emoji)
 
-    if emoji != "❌":
+    # Removing ✅ also means “leave”
+    if emoji == "✅":
+        handler = handle_reaction_remove
+    else:
         return
 
     async with lock:
-        channel = bot.get_channel(payload.channel_id)
-        message = await channel.fetch_message(payload.message_id)
+        channel  = bot.get_channel(payload.channel_id)
+        message  = await channel.fetch_message(payload.message_id)
         date_str = extract_date(message.content)
         if not date_str:
             return
 
-    await handle_reaction_remove(payload, member, message, date_str)
-
+    await handler(payload, member, message, date_str)
 async def update_raid_message(message_id: int, date_str: str):
     channel = bot.get_channel(CHANNEL_ID)
     message = await channel.fetch_message(message_id)
