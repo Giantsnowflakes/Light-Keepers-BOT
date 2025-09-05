@@ -392,7 +392,7 @@ async def update_raid_message(message_id: int, date_str: str):
     await asyncio.sleep(0.3)
     channel = bot.get_channel(CHANNEL_ID)
     message = await channel.fetch_message(message_id)
-        … rebuild embed …
+    
     await message.edit(content=…)
     recent_changes.clear()
 
