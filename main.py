@@ -68,6 +68,54 @@ lock = asyncio.Lock()
 slot_lock = asyncio.Lock()
 
 # —————————————————————————————————————————
+# Shared Helper: Build Raid Message Lines
+# —————————————————————————————————————————
+async def build_raid_lines(date_str: str) -> list[str]:
+    # Ensure the dicts exist
+    fire_slots   = fireteams.setdefault(date_str, {})
+    backup_slots = backups.setdefault(date_str, {})
+
+    lines = [
+        "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
+        "",
+        f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
+        "",
+        "🎯 **Fireteam Lineup (6 Players):**"
+    ]
+
+    # Fireteam
+    for i in range(6):
+        uid = fire_slots.get(i)
+        if uid:
+            user = await get_cached_user(uid)
+            mark = " ✅" if recent_changes.get(uid) == "joined" else ""
+            lines.append(f"{i+1}. {user.display_name}{mark}")
+        else:
+            lines.append(f"{i+1}. Empty Slot")
+
+    # Backups
+    lines.extend(["", "🛡️ **Backup Players (2):**"])
+    for i in range(2):
+        uid = backup_slots.get(i)
+        if uid:
+            user = await get_cached_user(uid)
+            mark = " ✅" if recent_changes.get(uid) == "joined" else ""
+            lines.append(f"Backup {i+1}: {user.display_name}{mark}")
+        else:
+            lines.append(f"Backup {i+1}: Empty")
+
+    # Footer
+    lines.extend([
+        "",
+        "✅ React with a ✅ if you're joining the raid.",
+        "❌ React with a ❌ if you can't make it.",
+        "",
+        "⚔️ Let’s assemble a legendary team and conquer the Desert Perpetual!"
+    ])
+
+    return lines
+
+# —————————————————————————————————————————
 # Debounced Embed Updates
 # —————————————————————————————————————————
 update_tasks: dict[int, asyncio.Task] = {}
@@ -101,40 +149,7 @@ CHANNEL_ID = 1209484610568720384  # your raid channel ID
 # Helper: Build the exact raid message text
 # —————————————————————————————————————————
 async def build_raid_message(date_str: str) -> str:
-    fire_slots = fireteams.get(date_str, {})
-    backup_slots = backups.get(date_str, {})
-    lines = [
-        "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
-        "",
-        f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
-        "",
-        "🎯 **Fireteam Lineup (6 Players):**"
-    ]
-    for i in range(6):
-        uid = fire_slots.get(i)
-        if uid:
-            user = await get_cached_user(uid)
-            lines.append(f"{i+1}. {user.display_name}")
-        else:
-            lines.append(f"{i+1}. Empty Slot")
-
-    lines.append("")
-    lines.append("🛡️ **Backup Players (2):**")
-    for i in range(2):
-        uid = backup_slots.get(i)
-        if uid:
-            user = await get_cached_user(uid)
-            lines.append(f"Backup {i+1}: {user.display_name}")
-        else:
-            lines.append(f"Backup {i+1}: Empty")
-
-    lines.extend([
-        "",
-        "✅ React with a ✅ if you're joining the raid.",
-        "❌ React with a ❌ if you can't make it.",
-        "",
-        "⚔️ Let’s assemble a legendary team and conquer the Desert Perpetual!"
-    ])
+    lines = await build_raid_lines(date_str)
     return "\n".join(lines)
 
 # —————————————————————————————————————————
@@ -389,54 +404,22 @@ async def on_raw_reaction_remove(payload):
     await handler(payload, member, message, date_str)
     
 async def update_raid_message(message_id: int, date_str: str):
+    # give Discord a moment before patching
     await asyncio.sleep(0.3)
+
     channel = bot.get_channel(CHANNEL_ID)
     message = await channel.fetch_message(message_id)
-    
-    fireteams.setdefault(date_str, {})
-    backups.setdefault(date_str, {})
 
-    # rebuild content (same as build_raid_message but with visual flags)
-    lines = [
-        "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
-        "",
-        f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
-        "",
-        "🎯 **Fireteam Lineup (6 Players):**"
-    ]
-    for i in range(6):
-        uid = fireteams[date_str].get(i)
-        if uid:
-            user = await get_cached_user(uid)
-            mark = " ✅" if recent_changes.get(uid) == "joined" else ""
-            lines.append(f"{i+1}. {user.display_name}{mark}")
-        else:
-            lines.append(f"{i+1}. Empty Slot")
+    # build the fresh content
+    lines = await build_raid_lines(date_str)
 
-    lines.append("")
-    lines.append("🛡️ **Backup Players (2):**")
-    for i in range(2):
-        uid = backups[date_str].get(i)
-        if uid:
-            user = await get_cached_user(uid)
-            mark = " ✅" if recent_changes.get(uid) == "joined" else ""
-            lines.append(f"Backup {i+1}: {user.display_name}{mark}")
-        else:
-            lines.append(f"Backup {i+1}: Empty")
-
-    lines.extend([
-        "",
-        "✅ React with a ✅ if you're joining the raid.",
-        "❌ React with a ❌ if you can't make it.",
-        "",
-        "⚔️ Let’s assemble a legendary team and conquer the Desert Perpetual!"
-    ])
-
+    # edit inside a try/except block
     try:
         await message.edit(content="\n".join(lines))
     except discord.HTTPException as e:
         logging.warning(f"Failed to edit raid message {message_id}: {e}")
 
+    # clear visual‐flag markers
     recent_changes.clear()
 
 # —————————————————————————————————————————
@@ -548,14 +531,25 @@ async def show_lineup(ctx, *, date_str: str):
     await ctx.send("\n".join(lines))
 
 @bot.command()
-async def settimezone(ctx, tz_name):
+async def settimezone(ctx, *, tz_name: str = None):
+    if not tz_name:
+        return await ctx.send("❌ Usage: `!settimezone <Region/City>`")
+
+    # Strip <>, replace spaces with slash, normalize casing
+    cleaned   = tz_name.strip("<>").replace(" ", "/")
+    region, _, city = cleaned.partition("/")
+    tz_clean  = f"{region.capitalize()}/{city.title()}" if city else cleaned.title()
+
     try:
-        pytz.timezone(tz_name)  # validate
-        user_timezones[str(ctx.author.id)] = tz_name
+        # Validate against pytz
+        pytz.timezone(tz_clean)
+        user_timezones[str(ctx.author.id)] = tz_clean
         save_timezones()
-        await ctx.send(f"✅ Timezone set to `{tz_name}` for {ctx.author.display_name}")
+        await ctx.send(f"✅ Timezone set to `{tz_clean}`.")
     except pytz.UnknownTimeZoneError:
-        await ctx.send("❌ Invalid timezone name. Try something like `Europe/Paris` or `America/New_York`.")
+        await ctx.send(
+            "❌ Invalid timezone—try `Europe/Paris` or `America/New_York`."
+        )
 
 @bot.command()
 async def mytimezone(ctx):
