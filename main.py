@@ -530,26 +530,22 @@ user_scores = load_scores()
 # —————————————————————————————————————————
 # Commands (unchanged)
 # —————————————————————————————————————————
- @bot.command(name="Raidleaderboard")
- async def Raidleaderboard(ctx):
--    if not scores:
-+    if not user_scores:
-         return await ctx.send("No scores yet. Start raiding to earn points!")
--    sorted_scores = sorted(
--        [(uid, pts) for uid, pts in scores.items() if uid != bot.user.id],
-+    sorted_scores = sorted(
-+        [(uid, data["score"]) for uid, data in user_scores.items()
-+            if uid != str(bot.user.id)],
-         key=lambda x: x[1], reverse=True
-     )
-     lines = []
--    for uid, pts in sorted_scores:
--        user = await bot.fetch_user(uid)
-+    for uid, pts in sorted_scores:
-+        user = await bot.fetch_user(int(uid))
-         lines.append(f"**{user.name}**: {pts} point{'s' if pts != 1 else ''}")
--    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(lines))
-+    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(lines))
+@bot.command(name="Raidleaderboard")
+async def Raidleaderboard(ctx):
+    if not user_scores:
+        return await ctx.send("No scores yet. Start raiding to earn points!")
+
+    sorted_scores = sorted(
+        [(uid, data["score"]) for uid, data in user_scores.items()
+         if uid != str(bot.user.id)],
+        key=lambda x: x[1], reverse=True
+    )
+    lines = []
+    for uid, pts in sorted_scores:
+        user = await bot.fetch_user(int(uid))
+        lines.append(f"**{user.name}**: {pts} point{'s' if pts != 1 else ''}")
+
+    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(lines))
 
 @bot.command(name="showlineup")
 async def show_lineup(ctx, *, date_str: str):
