@@ -64,8 +64,22 @@ def save_raids():
 # === Raid Data Structures ===
 fireteams: dict[str, dict[int, int]] = {}  # { date_str: {slot_index: user_id} }
 backups: dict[str, dict[int, int]] = {}    # { date_str: {slot_index: user_id} }
-lock = asyncio.Lock()
-slot_lock = asyncio.Lock()
+lock       = asyncio.Lock()
+slot_lock  = asyncio.Lock()
+last_schedule_date = None
+recent_changes: dict[int, str] = {}
+previous_week_messages: list[int] = []
+
+# ─────────────────────────────────────────────────────
+# Extract date from an embed’s hidden field  
+# ─────────────────────────────────────────────────────
+def extract_date(message: discord.Message) -> str | None:
+    if not message.embeds:
+        return None
+    embed = message.embeds[0]
+    if not embed.fields:
+        return None
+    return embed.fields[0].value
 
 # —————————————————————————————————————————
 # Shared Helper: Build Raid Message Lines
@@ -76,7 +90,7 @@ async def build_raid_lines(date_str: str) -> list[str]:
     backup_slots = backups.setdefault(date_str, {})
 
     lines = [
-        "🔥 **CLAN RAID EVENT: Desert Perpetual** 🔥",
+        EVENT_TITLE,
         "",
         f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
         "",
@@ -130,11 +144,6 @@ async def _debounced_update(message_id: int, date_str: str):
     await update_raid_message(message_id, date_str)
     update_tasks.pop(message_id, None)
 
-# In‐memory tracking for visual feedback & reminders
-recent_changes: dict[int, str] = {}  # user_id → "joined" or "left"
-previous_week_messages: list[int] = [] 
-last_schedule_date = None
-
 # === Logging & Intents ===
 logging.basicConfig(level=logging.INFO)
 intents = discord.Intents.default()
@@ -143,6 +152,9 @@ intents.reactions = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+EVENT_NAME   = "Desert Perpetual"
+EVENT_TITLE  = f"🔥 CLAN RAID EVENT: {EVENT_NAME} 🔥"
+EMBED_COLOR  = 0xFF4500
 CHANNEL_ID = 1209484610568720384  # your raid channel ID
 
 # —————————————————————————————————————————
@@ -163,11 +175,12 @@ async def sunday_scheduler():
 
     # Only run once each Sunday at 09:00 BST
     if now.weekday() == 6 and now.hour == 9 and last_schedule_date != now.date():
-        await schedule_weekly_posts_function()
-        last_schedule_date = now.date()
-    if now.weekday() != 6:
-        last_schedule_date = None
-
+       if now.weekday() != 6:
+           last_schedule_date = None
+        return
+    await schedule_weekly_posts_function()
+    last_schedule_date = now.date()
+           
 async def schedule_weekly_posts_function():
     tz      = pytz.timezone("Europe/London")
     now     = datetime.now(tz)
@@ -176,54 +189,63 @@ async def schedule_weekly_posts_function():
         logging.error(f"Could not find channel {CHANNEL_ID}")
         return
 
-    # 1) Delete messages from last week
-    for msg_id in previous_week_messages:
+    # 1) Delete last week’s messages
+    for mid in previous_week_messages:
         try:
-            old = await channel.fetch_message(msg_id)
-            await old.delete()
+            msg = await channel.fetch_message(mid)
+            await msg.delete()
         except discord.NotFound:
             pass
     previous_week_messages.clear()
 
-    # 2) Compute the coming week’s date strings
-    week_dates = {
-        (now + timedelta(days=i)).strftime("%A, %d %B")
-        for i in range(7)
-    }
-
-    # 3) Prune any dates outside this week, then persist
-    for date_str in list(fireteams):
-        if date_str not in week_dates:
-            fireteams.pop(date_str, None)
-            backups.pop(date_str,   None)
+    # 2) Build sorted list of dates and prune
+    week_dts   = sorted(now + timedelta(days=i) for i in range(7))
+    valid_strs = {dt.strftime("%A, %d %B") for dt in week_dts}
+    logging.info(f"Pruning dates: {set(fireteams) - valid_strs}")
+    for ds in list(fireteams):
+        if ds not in valid_strs:
+            fireteams.pop(ds, None)
+            backups.pop(ds, None)
     save_raids()
 
-    # 4) Detect which of this week’s dates are already posted
+    # 3) Detect already-posted days via embed metadata
     posted_dates = set()
     async for m in channel.history(limit=200):
-        if m.author == bot.user and "CLAN RAID EVENT" in m.content:
-            match = re.search(r"\*\*Day:\*\*\s*(.+?)\s*\|", m.content)
-            if match:
-                posted_dates.add(match.group(1).strip())
+        if m.author == bot.user and m.embeds:
+            hidden = extract_date(m)
+            if hidden:
+                posted_dates.add(hidden)
 
-    # 5) Post any missing days and record their IDs
-    for date_str in sorted(week_dates):
+    # 4) Post missing days, one-by-one in try/except
+    for dt in week_dts:
+        date_str = dt.strftime("%A, %d %B")
         if date_str in posted_dates:
             continue
 
         fireteams.setdefault(date_str, {})
         backups.setdefault(date_str, {})
 
-        content = await build_raid_message(date_str)
-        msg     = await channel.send(content)
-        await msg.add_reaction("✅")
-        await msg.add_reaction("❌")
-        previous_week_messages.append(msg.id)
+        try:
+            description = await build_raid_message(date_str)
+            embed = discord.Embed(
+                title=EVENT_TITLE,
+                description=description,
+                color=EMBED_COLOR
+            )
+            embed.add_field(name="\u200b", value=date_str, inline=False)
 
-    # 6) Persist again so newly scheduled slots survive restarts
+            msg = await channel.send(embed=embed)
+            logging.info(f"Posted {date_str} as message ID {msg.id}")
+
+            await msg.add_reaction("✅")
+            await msg.add_reaction("❌")
+            previous_week_messages.append(msg.id)
+
+        except Exception as e:
+            logging.error(f"Failed posting {date_str}: {e}")
+
+    # 5) Persist so new slots survive restarts
     save_raids()
-
-
 # —————————————————————————————————————————
 # Bot Events
 # —————————————————————————————————————————
@@ -257,10 +279,6 @@ async def on_resumed():
 # —————————————————————————————————————————
 # Reaction Handling: ✅ join / ❌ leave
 # —————————————————————————————————————————
-
-def extract_date(content: str) -> str | None:
-    m = re.search(r"\*\*Day:\*\*\s*(.+?)\s*\|", content)
-    return m.group(1).strip() if m else None
 
 async def handle_reaction_add(payload, member, message, date_str):
     async with slot_lock:
@@ -308,8 +326,6 @@ async def handle_reaction_add(payload, member, message, date_str):
 
         schedule_update(message.id, date_str)
         save_raids()
-
-
 
 async def handle_reaction_remove(payload, member, message, date_str):
     async with slot_lock:
@@ -372,7 +388,7 @@ async def on_raw_reaction_add(payload):
     async with lock:
         channel  = bot.get_channel(payload.channel_id)
         message  = await channel.fetch_message(payload.message_id)
-        date_str = extract_date(message.content)
+        date_str = extract_date(message)
         if not date_str:
             return
 
@@ -397,7 +413,7 @@ async def on_raw_reaction_remove(payload):
     async with lock:
         channel  = bot.get_channel(payload.channel_id)
         message  = await channel.fetch_message(payload.message_id)
-        date_str = extract_date(message.content)
+        date_str = extract_date(message)
         if not date_str:
             return
 
@@ -410,12 +426,13 @@ async def update_raid_message(message_id: int, date_str: str):
     channel = bot.get_channel(CHANNEL_ID)
     message = await channel.fetch_message(message_id)
 
-    # build the fresh content
-    lines = await build_raid_lines(date_str)
+    description = await build_raid_message(date_str)
+    embed = message.embeds[0]
+    embed.description = description
 
     # edit inside a try/except block
     try:
-        await message.edit(content="\n".join(lines))
+        await message.edit(embed=embed)
     except discord.HTTPException as e:
         logging.warning(f"Failed to edit raid message {message_id}: {e}")
 
