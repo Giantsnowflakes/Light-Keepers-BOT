@@ -1,13 +1,39 @@
 import os
 import discord
-from discord.ext import commands, tasks
-from datetime import datetime, timedelta
 import pytz
 import random
 import logging
 import re
 import asyncio
 import json
+import time
+from collections import deque
+from discord.ext import commands, tasks
+from datetime import datetime, timedelta
+
+# ─────────────────────────────────────────────────────
+# Rate‐limit helper for embed edits
+# ─────────────────────────────────────────────────────
+class RateLimiter:
+    def __init__(self, max_calls: int, per: float):
+        self.max_calls = max_calls
+        self.per       = per
+        self.calls     = deque()
+
+    async def wait(self):
+        now = time.monotonic()
+        # drop timestamps older than our window
+        while self.calls and now - self.calls[0] > self.per:
+            self.calls.popleft()
+
+        if len(self.calls) >= self.max_calls:
+            to_wait = self.per - (now - self.calls[0])
+            await asyncio.sleep(to_wait)
+
+        self.calls.append(time.monotonic())
+
+# one global instance—you’ll call edit_limiter.wait() before each embed.edit()
+edit_limiter = RateLimiter(max_calls=5, per=5.0)
 
 # === Dice Game Scores ===
 SCORES_FILE = "scores.json"
@@ -422,7 +448,7 @@ async def on_raw_reaction_remove(payload):
     
 async def update_raid_message(message_id: int, date_str: str):
     # give Discord a moment before patching
-    await asyncio.sleep(0.3)
+    await edit_limiter.wait()  
 
     channel = bot.get_channel(CHANNEL_ID)
     message = await channel.fetch_message(message_id)
@@ -504,19 +530,26 @@ user_scores = load_scores()
 # —————————————————————————————————————————
 # Commands (unchanged)
 # —————————————————————————————————————————
-@bot.command(name="Raidleaderboard")
-async def Raidleaderboard(ctx):
-    if not scores:
-        return await ctx.send("No scores yet. Start raiding to earn points!")
-    sorted_scores = sorted(
-        [(uid, pts) for uid, pts in scores.items() if uid != bot.user.id],
-        key=lambda x: x[1], reverse=True
-    )
-    lines = []
-    for uid, pts in sorted_scores:
-        user = await bot.fetch_user(uid)
-        lines.append(f"**{user.name}**: {pts} point{'s' if pts != 1 else ''}")
-    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(lines))
+ @bot.command(name="Raidleaderboard")
+ async def Raidleaderboard(ctx):
+-    if not scores:
++    if not user_scores:
+         return await ctx.send("No scores yet. Start raiding to earn points!")
+-    sorted_scores = sorted(
+-        [(uid, pts) for uid, pts in scores.items() if uid != bot.user.id],
++    sorted_scores = sorted(
++        [(uid, data["score"]) for uid, data in user_scores.items()
++            if uid != str(bot.user.id)],
+         key=lambda x: x[1], reverse=True
+     )
+     lines = []
+-    for uid, pts in sorted_scores:
+-        user = await bot.fetch_user(uid)
++    for uid, pts in sorted_scores:
++        user = await bot.fetch_user(int(uid))
+         lines.append(f"**{user.name}**: {pts} point{'s' if pts != 1 else ''}")
+-    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(lines))
++    await ctx.send("🏆 **Raid Leaderboard** 🏆\n" + "\n".join(lines))
 
 @bot.command(name="showlineup")
 async def show_lineup(ctx, *, date_str: str):
