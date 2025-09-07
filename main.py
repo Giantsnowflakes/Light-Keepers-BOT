@@ -173,14 +173,15 @@ async def sunday_scheduler():
     tz  = pytz.timezone("Europe/London")
     now = datetime.now(tz)
 
-    # Only run once each Sunday at 09:00 BST
-    if now.weekday() == 6 and now.hour == 9 and last_schedule_date != now.date():
-       if now.weekday() != 6:
-           last_schedule_date = None
-        return
-    await schedule_weekly_posts_function()
-    last_schedule_date = now.date()
-           
+    # If it’s Sunday at 09:00 BST and we haven’t run today, schedule
+    if now.weekday() == 6:
+        if now.hour == 9 and last_schedule_date != now.date():
+            await schedule_weekly_posts_function()
+            last_schedule_date = now.date()
+    else:
+        # Once it’s no longer Sunday, clear the flag so we’ll run again next week
+        last_schedule_date = None
+
 async def schedule_weekly_posts_function():
     tz      = pytz.timezone("Europe/London")
     now     = datetime.now(tz)
