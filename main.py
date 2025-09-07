@@ -10,6 +10,9 @@ import time
 from collections import deque
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from discord import Message, User
 
 # ─────────────────────────────────────────────────────
 # Rate‐limit helper for embed edits
@@ -34,6 +37,66 @@ class RateLimiter:
 
 # one global instance—you’ll call edit_limiter.wait() before each embed.edit()
 edit_limiter = RateLimiter(max_calls=5, per=5.0)
+
+# ─────────────────────────────────────────────────────
+# Badge System Persistence & Definitions
+# ─────────────────────────────────────────────────────
+BADGES_FILE = "badges.json"
+
+# Stats keys → total counts for each user
+user_stats: dict[str, dict[str,int]]  = {}  # e.g. {"1234": {"raids_joined": 7, "promotions": 2}}
+
+# Which badges each user has earned
+user_badges: dict[str, list[str]]      = {}  # e.g. {"1234": ["consecutive_raider_5", "backup_champion_3"]}
+
+# Badge definitions: key → name, emoji, and the stat threshold
+BADGE_DEFINITIONS = {
+    "raid_veteran_10": {
+        "name": "Raid Veteran",
+        "emoji": "🏆",
+        "threshold": {"stats_key": "raids_joined", "value": 10}
+    },
+    "backup_champion_3": {
+        "name": "Backup Champion",
+        "emoji": "🛡️",
+        "threshold": {"stats_key": "promotions", "value": 3}
+    },
+    # add more badges here...
+}
+
+def load_badges():
+    global user_stats, user_badges
+    try:
+        with open(BADGES_FILE, "r") as f:
+            data = json.load(f)
+            user_stats  = data.get("stats", {})
+            user_badges = data.get("badges", {})
+    except (FileNotFoundError, json.JSONDecodeError):
+        user_stats  = {}
+        user_badges = {}
+
+def save_badges():
+    with open(BADGES_FILE, "w") as f:
+        json.dump({"stats": user_stats, "badges": user_badges}, f)
+
+async def check_for_new_badges(member: discord.User, stats: dict[str,int]):
+    """
+    Looks at stats, awards any badges not yet given, DMs the user.
+    """
+    uid = str(member.id)
+    earned = user_badges.setdefault(uid, [])
+    for key, badge in BADGE_DEFINITIONS.items():
+        skey  = badge["threshold"]["stats_key"]
+        need  = badge["threshold"]["value"]
+        if stats.get(skey, 0) >= need and key not in earned:
+            earned.append(key)
+            # DM them their new badge
+            try:
+                await member.send(
+                    f"🎉 **Congratulations!** You earned the {badge['emoji']} **{badge['name']}** badge!"
+                )
+            except discord.Forbidden:
+                logging.warning(f"Could not DM badge to {member.display_name}")
 
 # === Dice Game Scores ===
 SCORES_FILE = "scores.json"
@@ -129,7 +192,12 @@ async def build_raid_lines(date_str: str) -> list[str]:
         if uid:
             user = await get_cached_user(uid)
             mark = " ✅" if recent_changes.get(uid) == "joined" else ""
-            lines.append(f"{i+1}. {user.display_name}{mark}")
+            badge_emojis = [
+                BADGE_DEFINITIONS[b]["emoji"]
+                for b in user_badges.get(str(uid), [])
+            ]
+            badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
+            lines.append(f"{i+1}. {user.display_name}{mark}{badge_str}")
         else:
             lines.append(f"{i+1}. Empty Slot")
 
@@ -140,9 +208,16 @@ async def build_raid_lines(date_str: str) -> list[str]:
         if uid:
             user = await get_cached_user(uid)
             mark = " ✅" if recent_changes.get(uid) == "joined" else ""
-            lines.append(f"Backup {i+1}: {user.display_name}{mark}")
-        else:
-            lines.append(f"Backup {i+1}: Empty")
+        badge_emojis = [
+            BADGE_DEFINITIONS[b]["emoji"]
+            for b in user_badges.get(str(uid), [])
+        ]
+        badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
+        # ↑
+
+        lines.append(f"Backup {i+1}: {user.display_name}{mark}{badge_str}")
+    else:
+        lines.append(f"Backup {i+1}: Empty")
 
     # Footer
     lines.extend([
@@ -280,6 +355,7 @@ async def schedule_weekly_posts_function():
 async def on_ready():
     load_timezones()
     load_raids()
+    load_badges()
     logging.info(f"Bot started as {bot.user}")
     sunday_scheduler.start()
     print(f"Logged in as {bot.user}")
@@ -350,6 +426,15 @@ async def handle_reaction_add(payload, member, message, date_str):
                 await member.send("You're on the backup list for now — if a slot opens up, you'll be moved automatically!")
         except discord.Forbidden:
             logging.warning(f"Could not DM {member.display_name}")
+            
+        # ───────── Badge logic ─────────
+        uid = str(member.id)
+        stats = user_stats.setdefault(uid, {"raids_joined": 0, "promotions": 0})
+        stats["raids_joined"] += 1
+
+        await check_for_new_badges(member, stats)
+        save_badges()
+        # ───────────────────────────────
 
         schedule_update(message.id, date_str)
         save_raids()
@@ -388,13 +473,22 @@ async def handle_reaction_remove(payload, member, message, date_str):
                     await promoted_member.send(f"You’ve been promoted to the fireteam for {date_str}! 🎉 Get ready to raid.")
                 except discord.Forbidden:
                     pass
+                    
+            # ───────── Badge logic ─────────
+            puid = str(promoted_uid)
+            pstats = user_stats.setdefault(puid, {"raids_joined": 0, "promotions": 0})
+            pstats["promotions"] += 1
 
+            # fetch_user only once
+            user_obj = promoted_member or await bot.fetch_user(promoted_uid)
+            await check_for_new_badges(user_obj, pstats)
+            save_badges()
+            # ─────────────────────────────────
+        
         recent_changes[member.id] = "left"
-                
-        schedule_update(message.id, date_str)
+        schedule_udate(message.id, date_str)
         save_raids()
           
-
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
