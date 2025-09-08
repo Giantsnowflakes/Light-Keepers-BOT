@@ -179,57 +179,55 @@ async def build_raid_lines(date_str: str) -> list[str]:
     backup_slots = backups.setdefault(date_str, {})
 
     lines = [
-        EVENT_TITLE,
-        "",
         f"📅 **Day:** {date_str} | 🕗 **Time:** 20:00 BST",
         "",
         "🎯 **Fireteam Lineup (6 Players):**"
     ]
 
-# Fireteam slots
-for i in range(6):
-    uid = fire_slots.get(i)
-    if not uid:
-        lines.append(f"{i+1}. Empty Slot")
-        continue
+    # Fireteam slots
+    for i in range(6):
+        uid = fire_slots.get(i)
+        if not uid:
+            lines.append(f"{i+1}. Empty Slot")
+            continue
 
-    try:
-        user = await get_cached_user(uid)
-    except Exception as e:
-        logging.warning(f"Could not fetch user {uid}: {e}")
-        lines.append(f"{i+1}. Unknown User")
-        continue
+        try:
+            user = await get_cached_user(uid)
+        except Exception as e:
+            logging.warning(f"Could not fetch user {uid}: {e}")
+            lines.append(f"{i+1}. Unknown User")
+            continue
 
-    mark = " ✅" if recent_changes.get(uid) == "joined" else ""
-    badge_emojis = [
-        BADGE_DEFINITIONS[b]["emoji"]
-        for b in user_badges.get(str(uid), [])
-    ]
-    badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
-    lines.append(f"{i+1}. {user.display_name}{mark}{badge_str}")
+        mark = " ✅" if recent_changes.get(uid) == "joined" else ""
+        badge_emojis = [
+            BADGE_DEFINITIONS[b]["emoji"]
+            for b in user_badges.get(str(uid), [])
+        ]
+        badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
+        lines.append(f"{i+1}. {user.display_name}{mark}{badge_str}")
 
-# Backups slots
-lines.extend(["", "🛡️ **Backup Players (2):**"])
-for i in range(2):
-    uid = backup_slots.get(i)
-    if not uid:
-        lines.append(f"Backup {i+1}: Empty")
-        continue
+    # Backup slots
+    lines.extend(["", "🛡️ **Backup Players (2):**"])
+    for i in range(2):
+        uid = backup_slots.get(i)
+        if not uid:
+            lines.append(f"Backup {i+1}: Empty")
+            continue
 
-    try:
-        user = await get_cached_user(uid)
-    except Exception as e:
-        logging.warning(f"Could not fetch backup user {uid}: {e}")
-        lines.append(f"Backup {i+1}: Unknown User")
-        continue
+        try:
+            user = await get_cached_user(uid)
+        except Exception as e:
+            logging.warning(f"Could not fetch backup user {uid}: {e}")
+            lines.append(f"Backup {i+1}: Unknown User")
+            continue
 
-    mark = " ✅" if recent_changes.get(uid) == "joined" else ""
-    badge_emojis = [
-        BADGE_DEFINITIONS[b]["emoji"]
-        for b in user_badges.get(str(uid), [])
-    ]
-    badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
-    lines.append(f"Backup {i+1}: {user.display_name}{mark}{badge_str}")
+        mark = " ✅" if recent_changes.get(uid) == "joined" else ""
+        badge_emojis = [
+            BADGE_DEFINITIONS[b]["emoji"]
+            for b in user_badges.get(str(uid), [])
+        ]
+        badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
+        lines.append(f"Backup {i+1}: {user.display_name}{mark}{badge_str}")
 
     # Footer
     lines.extend([
@@ -606,9 +604,15 @@ async def reminder_loop():
                 for uid in local_members:
                     try:
                         user = await bot.fetch_user(uid)
+                    except Exception as e:
+                        logging.warning(f"Could not fetch user {uid} for reminder: {e}")
+                        continue
+                
+                    try:
                         user_tz = pytz.timezone(user_timezones.get(str(uid), "Europe/London"))
                         local_time = raid_dt.astimezone(user_tz)
                         event_time_str = local_time.strftime('%H:%M %Z')
+
                         await user.send(
                             f"⏰ **One hour to glory!**\n"
                             f"🔥 The **{event_name}** kicks off on **{date_str}** at **{event_time_str}**.\n"
@@ -662,25 +666,38 @@ async def show_lineup(ctx, *, date_str: str):
     lines = [f"**Lineup for {date_str}:**"]
 
     # Fireteam slots
-    lines.append("\nFireteam:")
     for i in range(6):
         uid = fireteams.get(date_str, {}).get(i)
-        if uid:
-            user = await get_cached_user(uid)
-            lines.append(f"{i+1}. {user.display_name}")
-        else:
+        if not uid:
             lines.append(f"{i+1}. Empty Slot")
+            continue
+
+        try:
+            user = await get_cached_user(uid)
+        except Exception as e:
+            logging.warning(f"Could not fetch user {uid} for show_lineup: {e}")
+            lines.append(f"{i+1}. Unknown User")
+            continue
+
+        lines.append(f"{i+1}. {user.display_name}")
 
     # Backup slots
-    lines.append("\nBackups:")
     for i in range(2):
         uid = backups.get(date_str, {}).get(i)
-        if uid:
-            user = await get_cached_user(uid)
-            lines.append(f"Backup {i+1}: {user.display_name}")
-        else:
+        if not uid:
             lines.append(f"Backup {i+1}: Empty")
+            continue
 
+        try:
+            user = await get_cached_user(uid)
+        except Exception as e:
+            logging.warning(f"Could not fetch backup user {uid}: {e}")
+            lines.append(f"Backup {i+1}: Unknown User")
+            continue
+
+        lines.append(f"Backup {i+1}: {user.display_name}")
+
+    # Send once, after building all lines
     await ctx.send("\n".join(lines))
 
 @bot.command()
