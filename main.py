@@ -186,38 +186,50 @@ async def build_raid_lines(date_str: str) -> list[str]:
         "🎯 **Fireteam Lineup (6 Players):**"
     ]
 
-    # Fireteam
-    for i in range(6):
-        uid = fire_slots.get(i)
-        if uid:
-            user = await get_cached_user(uid)
-            mark = " ✅" if recent_changes.get(uid) == "joined" else ""
-            badge_emojis = [
-                BADGE_DEFINITIONS[b]["emoji"]
-                for b in user_badges.get(str(uid), [])
-            ]
-            badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
-            lines.append(f"{i+1}. {user.display_name}{mark}{badge_str}")
-        else:
-            lines.append(f"{i+1}. Empty Slot")
+# Fireteam slots
+for i in range(6):
+    uid = fire_slots.get(i)
+    if not uid:
+        lines.append(f"{i+1}. Empty Slot")
+        continue
 
-    # Backups
-    lines.extend(["", "🛡️ **Backup Players (2):**"])
-    for i in range(2):
-        uid = backup_slots.get(i)
-        if uid:
-            user = await get_cached_user(uid)
-            mark = " ✅" if recent_changes.get(uid) == "joined" else ""
-        badge_emojis = [
-            BADGE_DEFINITIONS[b]["emoji"]
-            for b in user_badges.get(str(uid), [])
-        ]
-        badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
-        # ↑
+    try:
+        user = await get_cached_user(uid)
+    except Exception as e:
+        logging.warning(f"Could not fetch user {uid}: {e}")
+        lines.append(f"{i+1}. Unknown User")
+        continue
 
-        lines.append(f"Backup {i+1}: {user.display_name}{mark}{badge_str}")
-    else:
+    mark = " ✅" if recent_changes.get(uid) == "joined" else ""
+    badge_emojis = [
+        BADGE_DEFINITIONS[b]["emoji"]
+        for b in user_badges.get(str(uid), [])
+    ]
+    badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
+    lines.append(f"{i+1}. {user.display_name}{mark}{badge_str}")
+
+# Backups slots
+lines.extend(["", "🛡️ **Backup Players (2):**"])
+for i in range(2):
+    uid = backup_slots.get(i)
+    if not uid:
         lines.append(f"Backup {i+1}: Empty")
+        continue
+
+    try:
+        user = await get_cached_user(uid)
+    except Exception as e:
+        logging.warning(f"Could not fetch backup user {uid}: {e}")
+        lines.append(f"Backup {i+1}: Unknown User")
+        continue
+
+    mark = " ✅" if recent_changes.get(uid) == "joined" else ""
+    badge_emojis = [
+        BADGE_DEFINITIONS[b]["emoji"]
+        for b in user_badges.get(str(uid), [])
+    ]
+    badge_str = " " + "".join(badge_emojis) if badge_emojis else ""
+    lines.append(f"Backup {i+1}: {user.display_name}{mark}{badge_str}")
 
     # Footer
     lines.extend([
