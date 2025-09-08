@@ -496,7 +496,7 @@ async def handle_reaction_remove(payload, member, message, date_str):
             # ─────────────────────────────────
         
         recent_changes[member.id] = "left"
-        schedule_udate(message.id, date_str)
+        schedule_update(message.id, date_str)
         save_raids()
           
 @bot.event
