@@ -649,7 +649,7 @@ async def reminder_loop():
                         logging.warning(f"Could not DM user {uid}")
 
                 reminder_sent[date_str] = True  # Mark as sent
-        await asyncio.sleep(60
+        await asyncio.sleep(60)
 # —————————————————————————————————————————
 # Utility Functions for Dice game
 # —————————————————————————————————————————
