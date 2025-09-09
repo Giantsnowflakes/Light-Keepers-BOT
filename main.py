@@ -251,9 +251,13 @@ def schedule_update(message_id: int, date_str: str):
     update_tasks[message_id] = asyncio.create_task(_debounced_update(message_id, date_str))
 
 async def _debounced_update(message_id: int, date_str: str):
-    await asyncio.sleep(1)   # wait for other reactions to settle
-    await update_raid_message(message_id, date_str)
-    update_tasks.pop(message_id, None)
+    try:
+        await asyncio.sleep(1)
+        await update_raid_message(message_id, date_str)
+    except Exception as e:
+        logging.error(f"Failed to update raid message {message_id}: {e}")
+    finally:
+        update_tasks.pop(message_id, None)
 
 # === Logging & Intents ===
 logging.basicConfig(level=logging.INFO)
@@ -262,7 +266,19 @@ intents.message_content = True
 intents.reactions = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+class MyBot(commands.Bot):
+    async def setup_hook(self):
+        load_timezones()
+        load_raids()
+        load_badges()
+        if not sunday_scheduler.is_running():
+            sunday_scheduler.start()
+        asyncio.create_task(reminder_loop())
+        if not previous_week_messages:
+            await schedule_weekly_posts_function()
+
+bot = MyBot(command_prefix="!", intents=intents)
+
 EVENT_NAME   = "Desert Perpetual"
 EVENT_TITLE  = f"🔥 CLAN RAID EVENT: {EVENT_NAME} 🔥"
 EMBED_COLOR  = 0xFF4500
@@ -367,7 +383,10 @@ async def on_ready():
     load_raids()
     load_badges()
     logging.info(f"Bot started as {bot.user}")
-    sunday_scheduler.start()
+
+    if not sunday_scheduler.is_running():
+        sunday_scheduler.start()
+    
     print(f"Logged in as {bot.user}")
     asyncio.create_task(reminder_loop())
 
@@ -573,23 +592,31 @@ async def update_raid_message(message_id: int, date_str: str):
 # —————————————————————————————————————————
 # Reminder Loop: 1 hour before each raid
 # —————————————————————————————————————————
+reminder_sent: dict[str, bool] = {}
+
 async def reminder_loop():
     await bot.wait_until_ready()
     tz = pytz.timezone("Europe/London")
+
     while not bot.is_closed():
         now = datetime.now(tz)
         for date_str, team in fireteams.items():
+            if reminder_sent.get(date_str):
+                continue  # Skip if already sent
+
             try:
                 raid_dt = datetime.strptime(date_str, "%A, %d %B")
-                raid_dt = raid_dt.replace(year=now.year, hour=20, minute=0, tzinfo=tz)
+                raid_dt = raid_dt.replace(year=now.year, hour=20, minute=0)
+                raid_dt = tz.localize(raid_dt)
                 if raid_dt < now:
                     raid_dt = raid_dt.replace(year=now.year + 1)
             except ValueError:
                 continue
 
             delta_minutes = (raid_dt - now).total_seconds() / 60
-            if 59 <= delta_minutes <= 61:
-                # find event name
+            logging.info(f"Now: {now}, Raid: {raid_dt}, Delta: {delta_minutes:.2f} minutes")
+
+            if 59.5 <= delta_minutes <= 60.5:
                 channel = bot.get_channel(CHANNEL_ID)
                 event_name = "the raid"
                 async for m in channel.history(limit=200):
@@ -607,7 +634,7 @@ async def reminder_loop():
                     except Exception as e:
                         logging.warning(f"Could not fetch user {uid} for reminder: {e}")
                         continue
-                
+
                     try:
                         user_tz = pytz.timezone(user_timezones.get(str(uid), "Europe/London"))
                         local_time = raid_dt.astimezone(user_tz)
@@ -620,7 +647,9 @@ async def reminder_loop():
                         )
                     except discord.Forbidden:
                         logging.warning(f"Could not DM user {uid}")
-        await asyncio.sleep(60)
+
+                reminder_sent[date_str] = True  # Mark as sent
+        await asyncio.sleep(60
 # —————————————————————————————————————————
 # Utility Functions for Dice game
 # —————————————————————————————————————————
