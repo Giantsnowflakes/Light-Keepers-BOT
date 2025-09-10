@@ -7,6 +7,7 @@ import re
 import asyncio
 import json
 import time
+from typing import Optional
 from collections import deque
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
@@ -240,6 +241,23 @@ async def build_raid_lines(date_str: str) -> list[str]:
 
     return lines
 
+def log_slot_change(
+    action: str,
+    member: discord.Member,
+    date_str: str,
+    slot: int,
+    previous_user: Optional[discord.Member] = None
+) -> None:
+    if previous_user:
+        logging.info(
+            f"[SLOT CHANGE] {action}: {member.display_name} → slot {slot+1} on {date_str}, "
+            f"replacing {previous_user.display_name}"
+        )
+    else:
+        logging.info(
+            f"[SLOT CHANGE] {action}: {member.display_name} → slot {slot+1} on {date_str}"
+        )
+
 # —————————————————————————————————————————
 # Debounced Embed Updates
 # —————————————————————————————————————————
@@ -260,7 +278,19 @@ async def _debounced_update(message_id: int, date_str: str):
         update_tasks.pop(message_id, None)
 
 # === Logging & Intents ===
-logging.basicConfig(level=logging.INFO)
+ # Clear any existing handlers (if you re-run or reload)
+ for h in list(logging.root.handlers):
+     logging.root.removeHandler(h)
+
+ # Configure both file and console output
+ file_handler = logging.FileHandler("slot_changes.log", encoding="utf-8")
+ console_handler = logging.StreamHandler()
+
+ logging.basicConfig(
+     level=logging.INFO,
+     format="%(asctime)s %(levelname)s %(message)s",
+     handlers=[file_handler, console_handler]
+ )
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
@@ -417,33 +447,71 @@ async def handle_reaction_add(payload, member, message, date_str):
         fireteams.setdefault(date_str, {})
         backups.setdefault(date_str, {})
 
-        already = member.id in fireteams[date_str].values() or member.id in backups[date_str].values()
+        assigned = False
+        already = (
+            member.id in fireteams[date_str].values()
+            or member.id in backups[date_str].values()
+        )
+
+        # ─── Prevent hijack if overwrite not allowed ───
         if already and not ALLOW_OVERWRITE:
             try:
-                await member.send("You're already signed up. Remove your reaction first to change your slot.")
+                await member.send(
+                    "You're already signed up. Remove your reaction first to change your slot."
+                )
             except discord.Forbidden:
                 logging.warning(f"Could not DM {member.display_name}")
             return
 
+        # ─── Clear their old slot if overwrite is allowed ───
         if already and ALLOW_OVERWRITE:
-            for d in (fireteams, backups):
-                for slot, uid in list(d[date_str].items()):
+            for store in (fireteams, backups):
+                for slot, uid in list(store[date_str].items()):
                     if uid == member.id:
-                        del d[date_str][slot]
+                        store[date_str].pop(slot)
+                        log_slot_change("Cleared old", member, date_str, slot)
 
-        # Assign to fireteam first
-        assigned = False
-        for i in range(6):
-            if i not in fireteams[date_str]:
-                fireteams[date_str][i] = member.id
+        # ─── Try to fill a fireteam slot ───
+        for slot in range(6):
+            prev_id = fireteams[date_str].get(slot)
+            if prev_id is None or prev_id == member.id:
+                fireteams[date_str][slot] = member.id
+
+                if prev_id and prev_id != member.id:
+                    prev_user = message.guild.get_member(prev_id)
+                    log_slot_change(
+                        "Overwritten", member, date_str, slot, prev_user
+                    )
+                else:
+                    log_slot_change("Assigned", member, date_str, slot)
+
                 assigned = True
                 break
 
-        # If full, assign to backup
+        # ─── If fireteam was full, fall back to backup ───
         if not assigned:
-            for i in range(2):
-                if i not in backups[date_str]:
-                    backups[date_str][i] = member.id
+            for slot in range(2):
+                prev_id = backups[date_str].get(slot)
+                if prev_id is None or prev_id == member.id:
+                    backups[date_str][slot] = member.id
+
+                    if prev_id and prev_id != member.id:
+                        prev_user = message.guild.get_member(prev_id)
+                        log_slot_change(
+                            "Overwritten (backup)",
+                            member,
+                            date_str,
+                            slot,
+                            prev_user
+                        )
+                    else:
+                        log_slot_change(
+                            "Assigned (backup)",
+                            member,
+                            date_str,
+                            slot
+                        )
+
                     assigned = True
                     break
 
