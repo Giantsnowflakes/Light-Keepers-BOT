@@ -278,19 +278,19 @@ async def _debounced_update(message_id: int, date_str: str):
         update_tasks.pop(message_id, None)
 
 # === Logging & Intents ===
- # Clear any existing handlers (if you re-run or reload)
- for h in list(logging.root.handlers):
-     logging.root.removeHandler(h)
+# Clear any existing handlers (if you re-run or reload)
+for h in list(logging.root.handlers):
+    logging.root.removeHandler(h)
 
- # Configure both file and console output
- file_handler = logging.FileHandler("slot_changes.log", encoding="utf-8")
- console_handler = logging.StreamHandler()
+# Configure both file and console output
+file_handler = logging.FileHandler("slot_changes.log", encoding="utf-8")
+console_handler = logging.StreamHandler()
 
- logging.basicConfig(
-     level=logging.INFO,
-     format="%(asctime)s %(levelname)s %(message)s",
-     handlers=[file_handler, console_handler]
- )
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[file_handler, console_handler]
+)    
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
