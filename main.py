@@ -165,14 +165,20 @@ previous_week_messages: list[int] = []
 # Extract date from an embed’s hidden field  
 # ─────────────────────────────────────────────────────
 def extract_date_from_message(message) -> str | None:
-    # Look for our “Date” field in any embed
-    for embed in message.embeds:
-        for field in embed.fields:
-            # match “Date” exactly or any name containing “date”
-            if "date" in field.name.lower():
-                return field.value.strip()
+    if not message.embeds:
+        return None
 
-    # No Date field found
+    embed = message.embeds[0]
+
+    # 1) Look for a named Date field
+    for field in embed.fields:
+        if "date" in field.name.lower():
+            return field.value.strip()
+
+    # 2) Legacy fallback: first field is the date
+    if embed.fields:
+        return embed.fields[0].value.strip()
+
     return None
 # —————————————————————————————————————————
 # Shared Helper: Build Raid Message Lines
@@ -487,6 +493,7 @@ async def on_resumed():
 # —————————————————————————————————————————
 
 async def handle_reaction_add(payload, member, message, date_str):
+    logging.info(f"HANDLE_SIGNUP: member={member.display_name} date={date_str}")
     async with slot_lock:
         fireteams.setdefault(date_str, {})
         backups.setdefault(date_str, {})
@@ -656,6 +663,7 @@ async def handle_reaction_remove(payload, member, message, date_str):
           
 @bot.event
 async def on_raw_reaction_add(payload):
+    logging.info(f"RAW REACTION ADD: user={payload.user_id} msg={payload.message_id} emoji={payload.emoji}"
     # Ignore bot’s own reactions
     if payload.user_id == bot.user.id:
         return
@@ -696,12 +704,14 @@ async def on_raw_reaction_add(payload):
         channel = guild.get_channel(payload.channel_id)
         message = await channel.fetch_message(payload.message_id)
         date_str = extract_date_from_message(message)
-        if not date_str or date_str == "unknown":
+        if not date_str:
+            logging.info(f"No date found on msg {message.id}, bailing out")
             return
-        await handle_reaction_remove(payload, member, message, date_str)
+        await handler(payload, member, message, date_str))
 
 @bot.event
 async def on_raw_reaction_remove(payload):
+    logging.info(f"[RAW_REMOVE] u={payload.user_id} m={payload.message_id} e={payload.emoji}")
     if payload.user_id == bot.user.id:
         return
 
@@ -722,7 +732,8 @@ async def on_raw_reaction_remove(payload):
 
         message = await channel.fetch_message(payload.message_id)
         date_str = extract_date_from_message(message)   # ← updated
-        if not date_str or date_str == "unknown":
+        if not date_str:
+            logging.info(f"No date found on msg {message.id}, bailing out (remove)")
             return
 
         await handle_reaction_remove(payload, member, message, date_str)
