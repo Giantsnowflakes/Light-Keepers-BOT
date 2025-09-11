@@ -163,35 +163,16 @@ previous_week_messages: list[int] = []
 # ─────────────────────────────────────────────────────
 # Extract date from an embed’s hidden field  
 # ─────────────────────────────────────────────────────
-def extract_date_from_message(message):
-    # Check embed fields first
+def extract_date_from_message(message) -> str | None:
+    # Look for our “Date” field in any embed
     for embed in message.embeds:
-        # ─── Look for a field named "Date" or similar ───
         for field in embed.fields:
+            # match “Date” exactly or any name containing “date”
             if "date" in field.name.lower():
-                date_str = field.value.strip()
-                parsed = try_parse_date(date_str)
-                if parsed:
-                    return parsed
+                return field.value.strip()
 
-        # ─── Fallback: search embed description ───
-        if embed.description:
-            parsed = try_parse_date(embed.description)
-            if parsed:
-                return parsed
-
-        # ─── Fallback: search embed title ───
-        if embed.title:
-            parsed = try_parse_date(embed.title)
-            if parsed:
-                return parsed
-
-    # ─── Final fallback: search message content ───
-    parsed = try_parse_date(message.content)
-    if parsed:
-        return parsed
-
-    return "unknown"
+    # No Date field found
+    return None
 # —————————————————————————————————————————
 # Shared Helper: Build Raid Message Lines
 # —————————————————————————————————————————
@@ -440,7 +421,7 @@ async def schedule_weekly_posts_function():
                 description=description,
                 color=EMBED_COLOR
             )
-            embed.add_field(name="\u200b", value=date_str, inline=False)
+            embed.add_field(name="Date",    value=date_str, inline=False)
 
             msg = await channel.send(embed=embed)
             logging.info(f"Posted {date_str} as message ID {msg.id}")
