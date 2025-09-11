@@ -152,8 +152,9 @@ def save_raids():
         }, f)
 
 # === Raid Data Structures ===
-fireteams: dict[str, dict[int, int]] = {}  # { date_str: {slot_index: user_id} }
-backups: dict[str, dict[int, int]] = {}    # { date_str: {slot_index: user_id} }
+fireteams: dict[str, dict[int, int]] = {}       # { date_str: {slot_index: user_id} }
+backups:  dict[str, dict[int, int]] = {}       # { date_str: {slot_index: user_id} }
+raid_log:  dict[str, list[str]]   = {}         # { date_str: [ "🛑 …", "✅ …", … ] }
 lock       = asyncio.Lock()
 slot_lock  = asyncio.Lock()
 last_schedule_date = None
@@ -358,16 +359,18 @@ async def build_raid_message(date_str: str) -> str:
 @tasks.loop(minutes=1)
 async def sunday_scheduler():
     global last_schedule_date
+
     tz  = pytz.timezone("Europe/London")
     now = datetime.now(tz)
 
-    # If it’s Sunday at 09:00 BST and we haven’t run today, schedule
-    if now.weekday() == 6:
-        if now.hour == 9 and last_schedule_date != now.date():
-            await schedule_weekly_posts_function()
-            last_schedule_date = now.date()
-    else:
-        # Once it’s no longer Sunday, clear the flag so we’ll run again next week
+    # Trigger only once, on Sunday at 09:00
+    if now.weekday() == 6 and now.hour == 9 and last_schedule_date != now.date():
+        logging.info("🗓️ Sunday 09:00 reached — rotating weekly posts")
+        await schedule_weekly_posts_function()
+        last_schedule_date = now.date()
+
+    # Reset flag after Sunday so next Sunday can run again
+    if now.weekday() != 6:
         last_schedule_date = None
 
 async def schedule_weekly_posts_function():
@@ -378,63 +381,72 @@ async def schedule_weekly_posts_function():
         logging.error(f"Could not find channel {CHANNEL_ID}")
         return
 
-    # 1) Delete last week’s messages
-    for mid in previous_week_messages:
-        try:
-            msg = await channel.fetch_message(mid)
-            await msg.delete()
-        except discord.NotFound:
-            pass
-    previous_week_messages.clear()
+    # Build set of the next 7 date strings: Sun → Sat
+    upcoming_dates = {
+        (now + timedelta(days=i)).strftime("%A, %d %B")
+        for i in range(7)
+    }
 
-    # 2) Build sorted list of dates and prune
-    week_dts   = sorted(now + timedelta(days=i) for i in range(7))
-    valid_strs = {dt.strftime("%A, %d %B") for dt in week_dts}
-    logging.info(f"Pruning dates: {set(fireteams) - valid_strs}")
-    for ds in list(fireteams):
-        if ds not in valid_strs:
-            fireteams.pop(ds, None)
-            backups.pop(ds, None)
-    save_raids()
-
-    # 3) Detect already-posted days via embed metadata
-    posted_dates = set()
+    # 1) Scan existing raid posts and collect (message, date_str)
+    existing = []
     async for m in channel.history(limit=200):
         if m.author == bot.user and m.embeds:
-            hidden = extract_date_from_message(m)
-            if hidden and hidden != "unknown":
-                posted_dates.add(hidden)
+            embed = m.embeds[0]
+            if embed.title == EVENT_TITLE:
+                date_val = extract_date_from_message(m)
+                if date_val:
+                    existing.append((m, date_val))
 
-    # 4) Post missing days, one-by-one in try/except
-    for dt in week_dts:
-        date_str = dt.strftime("%A, %d %B")
-        if date_str in posted_dates:
+    # 2) Delete any post not in upcoming_dates
+    for msg, date_val in existing:
+        if date_val not in upcoming_dates:
+            try:
+                await msg.delete()
+                logging.info(f"Deleted old raid post for {date_val} (msg {msg.id})")
+            except discord.NotFound:
+                pass
+            except Exception as e:
+                logging.error(f"Error deleting {msg.id}: {e}")
+
+    # 3) Rebuild previous_week_messages so you know exactly what’s live
+    previous_week_messages.clear()
+    for msg, date_val in existing:
+        if date_val in upcoming_dates:
+            previous_week_messages.append(msg.id)
+
+    # 4) Post missing days (prevents duplicates)
+    for i in range(7):
+        raid_dt  = now + timedelta(days=i)
+        date_str = raid_dt.strftime("%A, %d %B")
+
+        if date_str in {d for _, d in existing}:
+            logging.info(f"Skipping post for {date_str} (already exists)")
             continue
 
+        # Ensure data structures exist
         fireteams.setdefault(date_str, {})
         backups.setdefault(date_str, {})
 
-        try:
-            description = await build_raid_message(date_str)
-            embed = discord.Embed(
-                title=EVENT_TITLE,
-                description=description,
-                color=EMBED_COLOR
-            )
-            embed.add_field(name="Date",    value=date_str, inline=False)
+        # Build and send embed
+        description = await build_raid_message(date_str)
+        embed = discord.Embed(
+            title=EVENT_TITLE,
+            description=description,
+            color=EMBED_COLOR
+        )
+        embed.add_field(name="Date", value=date_str, inline=False)
 
-            msg = await channel.send(embed=embed)
-            logging.info(f"Posted {date_str} as message ID {msg.id}")
+        msg = await channel.send(embed=embed)
+        await msg.add_reaction("✅")
+        await msg.add_reaction("❌")
+        logging.info(f"Posted raid for {date_str} as message {msg.id}")
 
-            await msg.add_reaction("✅")
-            await msg.add_reaction("❌")
-            previous_week_messages.append(msg.id)
+        previous_week_messages.append(msg.id)
 
-        except Exception as e:
-            logging.error(f"Failed posting {date_str}: {e}")
-
-    # 5) Persist so new slots survive restarts
+    # 5) Persist fireteams/backups
     save_raids()
+    logging.info("Weekly posts rotated successfully")
+
 # —————————————————————————————————————————
 # Bot Events
 # —————————————————————————————————————————
