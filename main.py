@@ -163,14 +163,35 @@ previous_week_messages: list[int] = []
 # ─────────────────────────────────────────────────────
 # Extract date from an embed’s hidden field  
 # ─────────────────────────────────────────────────────
-def extract_date(message: discord.Message) -> str | None:
-    if not message.embeds:
-        return None
-    embed = message.embeds[0]
-    if not embed.fields:
-        return None
-    return embed.fields[0].value
+def extract_date_from_message(message):
+    # Check embed fields first
+    for embed in message.embeds:
+        # ─── Look for a field named "Date" or similar ───
+        for field in embed.fields:
+            if "date" in field.name.lower():
+                date_str = field.value.strip()
+                parsed = try_parse_date(date_str)
+                if parsed:
+                    return parsed
 
+        # ─── Fallback: search embed description ───
+        if embed.description:
+            parsed = try_parse_date(embed.description)
+            if parsed:
+                return parsed
+
+        # ─── Fallback: search embed title ───
+        if embed.title:
+            parsed = try_parse_date(embed.title)
+            if parsed:
+                return parsed
+
+    # ─── Final fallback: search message content ───
+    parsed = try_parse_date(message.content)
+    if parsed:
+        return parsed
+
+    return "unknown"
 # —————————————————————————————————————————
 # Shared Helper: Build Raid Message Lines
 # —————————————————————————————————————————
@@ -258,6 +279,35 @@ def log_slot_change(
             f"[SLOT CHANGE] {action}: {member.display_name} → slot {slot+1} on {date_str}"
         )
 
+def try_parse_date(text):
+    # Match common date formats
+    patterns = [
+        r"\b\d{4}-\d{2}-\d{2}\b",              
+        r"\b\d{1,2} [A-Za-z]{3,9} \d{4}\b",     
+        r"\b[A-Za-z]+,? \d{1,2} [A-Za-z]+ \d{4}\b",  
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            try:
+                return datetime.strptime(match.group(), "%Y-%m-%d").strftime("%Y-%m-%d")
+            except ValueError:
+                try:
+                    return datetime.strptime(match.group(), "%d %b %Y").strftime("%Y-%m-%d")
+                except ValueError:
+                    try:
+                        return datetime.strptime(match.group(), "%A, %d %B %Y").strftime("%Y-%m-%d")
+                    except ValueError:
+                        pass
+    return None
+
+async def get_display_name(uid: int, guild: discord.Guild) -> str:
+    member = guild.get_member(uid)
+    if not member:
+        member = await get_cached_user(uid)
+    return member.display_name if hasattr(member, "display_name") else member.name
+    
 # —————————————————————————————————————————
 # Debounced Embed Updates
 # —————————————————————————————————————————
@@ -540,102 +590,146 @@ async def handle_reaction_remove(payload, member, message, date_str):
     async with slot_lock:
         fireteams.setdefault(date_str, {})
         backups.setdefault(date_str, {})
+        raid_log.setdefault(date_str, [])
 
-        # Remove user from both lists
+        removed = False
+        freed_slots: list[int] = []
+
+        # ─── Remove member from fireteam ───
         for slot, uid in list(fireteams[date_str].items()):
             if uid == member.id:
                 del fireteams[date_str][slot]
+                freed_slots.append(slot)
+                removed = True
+                raid_log[date_str].append(
+                    f"🛑 {member.display_name} removed from fireteam slot {slot + 1}"
+                )
+
+        # ─── Remove member from backups ───
         for slot, uid in list(backups[date_str].items()):
             if uid == member.id:
                 del backups[date_str][slot]
+                removed = True
+                raid_log[date_str].append(
+                    f"🛑 {member.display_name} removed from backup slot {slot + 1}"
+                )
 
-        # Auto-promote backup if fireteam has space
-        promoted_uid = None
-        if len(fireteams[date_str]) < 6:
-            for i in range(2):
-                uid = backups[date_str].get(i)
-                if uid and uid not in fireteams[date_str].values():
-                    next_slot = max(fireteams[date_str].keys(), default=-1) + 1
+        # ─── Promote one backup if needed ───
+        promoted_uid: int | None = None
+        if removed and len(fireteams[date_str]) < 6:
+            for i in sorted(backups[date_str].keys()):
+                uid = backups[date_str][i]
+                if uid not in fireteams[date_str].values():
+                    next_slot = (
+                        freed_slots.pop(0)
+                        if freed_slots
+                        else max(fireteams[date_str].keys(), default=-1) + 1
+                    )
                     fireteams[date_str][next_slot] = uid
                     del backups[date_str][i]
                     recent_changes[uid] = "joined"
                     promoted_uid = uid
-                    break
 
-        # Notify promoted user
+                    # Log by display name
+                    name = await get_display_name(promoted_uid, message.guild)
+                    raid_log[date_str].append(
+                        f"✅ Promoted {name} to fireteam slot {next_slot + 1} from backup slot {i + 1}"
+                    )
+                    break  # only one promotion
+
+        # ─── Notify & badge logic for the promoted user ───
         if promoted_uid:
             promoted_member = message.guild.get_member(promoted_uid)
-            if promoted_member:
-                try:
-                    await promoted_member.send(f"You’ve been promoted to the fireteam for {date_str}! 🎉 Get ready to raid.")
-                except discord.Forbidden:
-                    pass
-                    
-            # ───────── Badge logic ─────────
+            try:
+                dm_target = promoted_member or await get_cached_user(promoted_uid)
+                await dm_target.send(
+                    f"You’ve been promoted to the fireteam for {date_str}! 🎉 Get ready to raid."
+                )
+            except discord.Forbidden:
+                pass
+
             puid = str(promoted_uid)
             pstats = user_stats.setdefault(puid, {"raids_joined": 0, "promotions": 0})
             pstats["promotions"] += 1
-
-            # fetch_user only once
             user_obj = promoted_member or await bot.fetch_user(promoted_uid)
             await check_for_new_badges(user_obj, pstats)
             save_badges()
-            # ─────────────────────────────────
-        
+
+        # ─── Finalize removal ───
         recent_changes[member.id] = "left"
         schedule_update(message.id, date_str)
         save_raids()
           
 @bot.event
 async def on_raw_reaction_add(payload):
+    # Ignore bot’s own reactions
     if payload.user_id == bot.user.id:
         return
 
-    guild  = bot.get_guild(payload.guild_id)
+    # Fetch guild, channel, message, member
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+    channel = guild.get_channel(payload.channel_id)
+    if not channel:
+        return
+    message = await channel.fetch_message(payload.message_id)
     member = await guild.fetch_member(payload.user_id)
-    emoji  = str(payload.emoji)
+    emoji = str(payload.emoji)
 
-    # ✅ adds sign-up, ❌ triggers leave
+    # 1) Enforce max-8 users per emoji
+    reaction = discord.utils.get(message.reactions, emoji=payload.emoji)
+    if reaction:
+        users = [user async for user in reaction.users()]
+        if len(users) > 8:
+            await message.remove_reaction(payload.emoji, member)
+            try:
+                await member.send(f"❌ Only 8 users can react with {emoji} on that message.")
+            except discord.Forbidden:
+                logging.warning(f"Could not DM {member.display_name}")
+            return  # stop here
+
+    # 2) Route ✅ to join, ❌ to leave
     if emoji == "✅":
         handler = handle_reaction_add
     elif emoji == "❌":
         handler = handle_reaction_remove
     else:
-        return
+        return  # ignore other emojis
 
+    # 3) Extract the raid date and dispatch
     async with lock:
-        channel  = bot.get_channel(payload.channel_id)
-        message  = await channel.fetch_message(payload.message_id)
-        date_str = extract_date(message)
-        if not date_str:
+        date_str = extract_date_from_message(message)
+        if not date_str or date_str == "unknown":
             return
-
-    await handler(payload, member, message, date_str)
-
+        await handler(payload, member, message, date_str)
 
 @bot.event
 async def on_raw_reaction_remove(payload):
     if payload.user_id == bot.user.id:
         return
 
-    guild  = bot.get_guild(payload.guild_id)
-    member = await guild.fetch_member(payload.user_id)
-    emoji  = str(payload.emoji)
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
 
-    # Removing ✅ also means “leave”
-    if emoji == "✅":
-        handler = handle_reaction_remove
-    else:
+    member = await guild.fetch_member(payload.user_id)
+    emoji = str(payload.emoji)
+
+    if emoji != "✅":
         return
 
     async with lock:
-        channel  = bot.get_channel(payload.channel_id)
-        message  = await channel.fetch_message(payload.message_id)
-        date_str = extract_date(message)
-        if not date_str:
+        channel = guild.get_channel(payload.channel_id)
+        if not channel:
             return
 
-    await handler(payload, member, message, date_str)
+        message = await channel.fetch_message(payload.message_id)
+        date_str = extract_date_from_message(message)   # ← updated
+        if not date_str or date_str == "unknown":
+            return
+
+        await handle_reaction_remove(payload, member, message, date_str)
     
 async def update_raid_message(message_id: int, date_str: str):
     # give Discord a moment before patching
