@@ -420,8 +420,8 @@ async def schedule_weekly_posts_function():
     posted_dates = set()
     async for m in channel.history(limit=200):
         if m.author == bot.user and m.embeds:
-            hidden = extract_date(m)
-            if hidden:
+            hidden = extract_date_from_message(m)
+            if hidden and hidden != "unknown":
                 posted_dates.add(hidden)
 
     # 4) Post missing days, one-by-one in try/except
@@ -483,6 +483,7 @@ async def on_resumed():
         previous_week_messages.clear()
         async for m in channel.history(limit=200):
             if m.author == bot.user and "CLAN RAID EVENT" in m.content:
+                hidden = extract_date_from_message(m)
                 previous_week_messages.append(m.id)
         if not previous_week_messages:
             logging.info("No raid posts found on resume → posting week block now")
@@ -699,10 +700,12 @@ async def on_raw_reaction_add(payload):
 
     # 3) Extract the raid date and dispatch
     async with lock:
+        channel = guild.get_channel(payload.channel_id)
+        message = await channel.fetch_message(payload.message_id)
         date_str = extract_date_from_message(message)
         if not date_str or date_str == "unknown":
             return
-        await handler(payload, member, message, date_str)
+        await handle_reaction_remove(payload, member, message, date_str)
 
 @bot.event
 async def on_raw_reaction_remove(payload):
