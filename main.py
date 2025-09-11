@@ -663,12 +663,16 @@ async def handle_reaction_remove(payload, member, message, date_str):
           
 @bot.event
 async def on_raw_reaction_add(payload):
-    logging.info(f"RAW REACTION ADD: user={payload.user_id} msg={payload.message_id} emoji={payload.emoji}"
-    # Ignore bot’s own reactions
+    # ─── Debug log ───
+    logging.info(
+        f"[RAW ADD] user={payload.user_id} msg={payload.message_id} emoji={payload.emoji}"
+    )
+
+    # ─── 1) Ignore the bot’s own reactions ───
     if payload.user_id == bot.user.id:
         return
 
-    # Fetch guild, channel, message, member
+    # ─── 2) Fetch guild, channel, message, member ───
     guild = bot.get_guild(payload.guild_id)
     if not guild:
         return
@@ -676,38 +680,37 @@ async def on_raw_reaction_add(payload):
     if not channel:
         return
     message = await channel.fetch_message(payload.message_id)
-    member = await guild.fetch_member(payload.user_id)
-    emoji = str(payload.emoji)
+    member  = await guild.fetch_member(payload.user_id)
+    emoji   = str(payload.emoji)
 
-    # 1) Enforce max-8 users per emoji
+    # ─── 3) Enforce max-8 users per emoji ───
     reaction = discord.utils.get(message.reactions, emoji=payload.emoji)
     if reaction:
-        users = [user async for user in reaction.users()]
+        users = [u async for u in reaction.users()]
         if len(users) > 8:
             await message.remove_reaction(payload.emoji, member)
             try:
                 await member.send(f"❌ Only 8 users can react with {emoji} on that message.")
             except discord.Forbidden:
                 logging.warning(f"Could not DM {member.display_name}")
-            return  # stop here
+            return
 
-    # 2) Route ✅ to join, ❌ to leave
+    # ─── 4) Route ✅ to join, ❌ to leave ───
     if emoji == "✅":
         handler = handle_reaction_add
     elif emoji == "❌":
         handler = handle_reaction_remove
     else:
-        return  # ignore other emojis
+        return
 
-    # 3) Extract the raid date and dispatch
+    # ─── 5) Extract the raid date and dispatch ───
     async with lock:
-        channel = guild.get_channel(payload.channel_id)
-        message = await channel.fetch_message(payload.message_id)
         date_str = extract_date_from_message(message)
         if not date_str:
             logging.info(f"No date found on msg {message.id}, bailing out")
             return
-        await handler(payload, member, message, date_str))
+
+        await handler(payload, member, message, date_str)
 
 @bot.event
 async def on_raw_reaction_remove(payload):
